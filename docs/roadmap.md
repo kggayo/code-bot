@@ -12,7 +12,7 @@ in the status table in `AGENTS.md`; the reasoning is in `docs/decisions.md`
 
 | Item | Outcome |
 |---|---|
-| 1.1 Verify macOS and Linux | Linux verified in WSL2 Ubuntu 24.04 (tests, end-to-end, AppImage and deb, packaged app). macOS skipped by the owner (no Mac). CI workflow for Windows and Linux in `.github/workflows/build.yml`, not run yet (nothing pushed). |
+| 1.1 Verify macOS and Linux | Linux verified in WSL2 Ubuntu 24.04 (tests, end-to-end, AppImage and deb, packaged app). macOS skipped by the owner (no Mac). CI workflow for Windows and Linux in `.github/workflows/build.yml`: passes on GitHub's runners (tests, end-to-end, installers). |
 | 1.2 Installers people can trust | App icon (`build/`). Signing deferred until the app is shared (decision 26). Package trimming measured and dropped (decision 23). |
 | 1.3 One git worktree per sub-agent | Built (decision 20). |
 | 1.4 Sign-in check | Built: banner with Sign in, and the engines in Settings. |
@@ -30,8 +30,6 @@ in the status table in `AGENTS.md`; the reasoning is in `docs/decisions.md`
   `npm run package`, `node scripts/packaged-check.ts`; or add `macos-latest` to
   the CI matrix. Signing and notarization need the Apple Developer Program.
   `openTerminal` on macOS (a `.command` file opened in Terminal) is untested.
-- **Run the CI workflow.** It runs on the first push to `main` of
-  https://github.com/kggayo/code-bot.
 - **Signing** when the app is shared (decision 26 lists the options and the
   `claude.exe` signature catch).
 - **OpenCode with a real model.** Run `node scripts/opencode-check.ts` when the

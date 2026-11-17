@@ -72,10 +72,11 @@ and verified:
 | Codex engine | Through the app (above), and `scripts/codex-check.ts` against real Codex 0.160.1 (ChatGPT login, cheap model): a file created after an approval, a resumed thread that remembers it, a question relayed through `askUser` and answered; `test/codex.test.ts` (12 tests) against a fake app-server |
 | Open in terminal | The launcher (`src/desktop/main/terminal.ts`) starts a detached program in the given folder on Windows; the interactive Claude/Codex session it opens was not driven by a test |
 | Packaged Windows app | `electron-builder --win` + `scripts/packaged-check.ts`: starts, the sign-in check runs its unpacked Claude Code, a real main-bot turn runs. App icon. Unsigned. |
+| CI on GitHub | `.github/workflows/build.yml` on `windows-latest` and `ubuntu-latest` (under a virtual display): typecheck, tests, end-to-end and installers, uploaded as artifacts. Passed on both for the first push to `main` (2026-11-17), https://github.com/kggayo/code-bot/actions |
 | Linux AppImage and deb | Built in WSL with `npm run package:linux`; `scripts/packaged-check.ts` against `release/linux-unpacked`: starts and its sign-in check runs the unpacked Claude Code. The model turn was skipped: Claude Code in WSL was not signed in (its April login had expired) |
 
 Not verified: macOS (no Mac), `npm run live` on Linux (needs `claude auth login`
-in WSL), installing the NSIS installer, the CI workflow (nothing pushed yet), code
+in WSL), installing the NSIS installer, code
 signing, the quit prompt and system notifications (native dialogs). Next: see
 `docs/roadmap.md`.
 
@@ -166,7 +167,7 @@ folder) and `worktrees/` (sub-agents' git worktrees).
 | `scripts/codex-check.ts`, `scripts/opencode-check.ts`, `scripts/auto-mode-check.ts` | Live checks of the Codex and OpenCode engines and of Claude Code's `auto` mode. |
 | `scripts/make-icons.mjs`, `build/` | The app icon: `build/icon.svg` and the PNG/ICO files made from it. |
 | `scripts/wsl-sync.sh` | Copies the checkout into WSL for Linux builds and checks. |
-| `.github/workflows/build.yml` | CI for Windows and Linux: typecheck, tests, end-to-end, installers. Not run yet. |
+| `.github/workflows/build.yml` | CI for Windows and Linux on every push to `main` and every pull request: typecheck, tests, end-to-end, installers (as artifacts). |
 | `docs/architecture.md` | Components, the three levels, routing rules, lifecycle, security model. |
 | `docs/api.md` | Operations, events and bot tools: the contract between window and core. |
 | `docs/decisions.md` | Why things are the way they are, including what was rejected and replaced. |
