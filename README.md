@@ -28,10 +28,8 @@ and a banner with a Sign in button when a coding agent is not signed in.
 
 ## Run it
 
-Needs Node 24 or newer for development, and Claude Code signed in on the machine
-(the app checks and offers to sign in; `claude auth login` does the same). For
-Codex sub-agents, the Codex CLI installed and signed in (`codex login`); for
-OpenCode sub-agents, OpenCode installed (`npm install -g opencode-ai`).
+Needs Node 24 or newer for development, and Claude signed in on the machine
+(see [Signing in](#signing-in) below).
 
 ```bash
 npm install
@@ -53,6 +51,40 @@ CODE_BOT_FAKE_MODELS=1 npm run dev
 `@name task: …` to the main bot delegates, and in a project bot's conversation
 `task: …` starts a sub-agent; see `src/core/scripted-brain.ts` for the
 keywords.
+
+## Signing in
+
+code-bot has no account or login of its own. Each coding agent keeps its own
+sign-in on your computer and code-bot uses it; it never sees your password or
+token. Sign in once per agent and per computer (WSL counts as a separate one).
+
+**Claude** is always needed: the main bot and the project bots run on it.
+
+- In the app: when Claude is not signed in, a banner at the top says so. Click
+  **Sign in**: a terminal opens with `claude auth login`, which opens your
+  browser to sign in with your Claude account (a paid plan such as Pro or Max).
+  Come back to the window; it checks again by itself, or click **Check again**.
+- Or in a terminal: `claude auth login`, then `claude auth status` to check.
+- You do not need to install Claude Code: code-bot ships its own copy, which
+  shares the sign-in with any `claude` you already have.
+- An `ANTHROPIC_API_KEY` environment variable works too; usage is then billed
+  per token instead of coming from your subscription.
+
+**Codex**, only for projects whose sub-agents use it (bot settings, "Coding
+agent"):
+
+- Install the Codex CLI: `npm install -g @openai/codex`, or the Codex desktop
+  app, which brings it.
+- Sign in with `codex login` (your ChatGPT account, in the browser) and check
+  with `codex login status`. Once a project uses Codex, the banner offers
+  **Sign in** for it too.
+
+**OpenCode**, only for projects that use it: install it with
+`npm install -g opencode-ai`. Its free models need no sign-in; for other
+providers, run `opencode auth login`.
+
+**⚙ Settings → Coding agents on this computer** shows whether each agent is
+ready.
 
 ## Build an installer
 
