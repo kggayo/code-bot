@@ -1,0 +1,43 @@
+# Packaging for Windows, macOS and Linux. Build each platform on that platform:
+# the Claude Code binary comes from a per-platform npm package that npm only
+# installs for the machine it runs on.
+appId: com.code-bot.desktop
+productName: code-bot
+directories:
+  output: release
+  # Icons: build/icon.ico (Windows), build/icons/*.png (Linux), build/icon.png
+  # (the source for macOS). Made from build/icon.svg by scripts/make-icons.mjs.
+  buildResources: build
+files:
+  - out/**
+  - package.json
+# The window icon on Linux (see windowIcon in src/desktop/main/index.ts).
+extraResources:
+  - from: build/icon.png
+    to: icon.png
+# Claude Code cannot run from inside the app archive; the main process points
+# the SDK at the unpacked copy (see claudeExecutable in src/desktop/main/index.ts).
+asarUnpack:
+  - node_modules/@anthropic-ai/claude-agent-sdk-*/**
+# No native modules: SQLite is built into Electron's Node.
+npmRebuild: false
+win:
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.developer-tools
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Development
+  executableName: code-bot
+  synopsis: Orchestrates coding agents on your own machine
+  description: A main bot routes your requests to project bots, which run Claude Code (or Codex) sub-agents in your project folders.
+  maintainer: code-bot

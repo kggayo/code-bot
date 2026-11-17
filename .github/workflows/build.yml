@@ -1,0 +1,65 @@
+# Checks and installers for each platform, built on that platform (the Claude
+# Code binary is a per-platform npm package). Runs the tests and the scripted
+# end-to-end check; never calls a model. Installers are unsigned: see
+# docs/roadmap.md ("Installers people can trust").
+#
+# macOS is left out until there is a Mac to verify on; to add it, add
+# macos-latest to the matrix (the dmg will be unsigned and not notarized).
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      - name: End-to-end check (Linux, virtual display)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libasound2t64 libxss1 libnotify4 libgbm1
+          git config --global user.email ci@example.com
+          git config --global user.name ci
+          xvfb-run -a npm run e2e
+
+      - name: End-to-end check (Windows)
+        if: runner.os == 'Windows'
+        run: npm run e2e
+
+      - name: Installer
+        run: npx electron-builder --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: code-bot-${{ matrix.os }}
+          path: |
+            release/*.exe
+            release/*.AppImage
+            release/*.deb
+          if-no-files-found: error
