@@ -88,6 +88,7 @@ app itself runs on Electron 45's bundled Node 24.
 
 ```bash
 npm install
+npm run code-bot     # build the app and start it (same as npm start)
 npm run dev          # the app with hot reload
 npm run typecheck    # tsconfig.json (core, main, preload, tests) + tsconfig.web.json (renderer)
 npm test             # core tests: no Electron, no model usage

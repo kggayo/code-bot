@@ -56,12 +56,13 @@ the machine.
 
 ```bash
 npm install
-npm run dev
+npm run code-bot
 ```
 
-`npm run <name>` runs a script defined in `package.json`: `dev` starts code-bot
-from the source code, with live reload as you change it. `npm start` builds it
-and runs it as the installed app would.
+`npm run code-bot` builds code-bot from the source code and starts it, as the
+installed app would run. While changing the code, use `npm run dev` instead: it
+starts code-bot with live reload as you edit. (`npm run <name>` runs a script
+defined in `package.json`.)
 
 To try the app without using any model, start it in demo mode with scripted
 bots and mock sub-agents:

@@ -19,6 +19,7 @@
     "node": ">=24"
   },
   "scripts": {
+    "code-bot": "electron-vite preview",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
