@@ -72,6 +72,7 @@ and verified:
 | Codex engine | Through the app (above), and `scripts/codex-check.ts` against real Codex 0.160.1 (ChatGPT login, cheap model): a file created after an approval, a resumed thread that remembers it, a question relayed through `askUser` and answered; `test/codex.test.ts` (12 tests) against a fake app-server |
 | Open in terminal | The launcher (`src/desktop/main/terminal.ts`) starts a detached program in the given folder on Windows; the interactive Claude/Codex session it opens was not driven by a test |
 | Packaged Windows app | `electron-builder --win` + `scripts/packaged-check.ts`: starts, the sign-in check runs its unpacked Claude Code, a real main-bot turn runs. App icon. Unsigned. |
+| Releases | `.github/workflows/release.yml` published v0.3.0 from its tag (2026-11-17): Windows installer and portable zip, Linux AppImage and deb, built and tested on GitHub's runners, https://github.com/kggayo/code-bot/releases |
 | CI on GitHub | `.github/workflows/build.yml` on `windows-latest` and `ubuntu-latest` (under a virtual display): typecheck, tests, end-to-end and installers, uploaded as artifacts. Passed on both for the first push to `main` (2026-11-17), https://github.com/kggayo/code-bot/actions |
 | Linux AppImage and deb | Built in WSL with `npm run package:linux`; `scripts/packaged-check.ts` against `release/linux-unpacked`: starts and its sign-in check runs the unpacked Claude Code. The model turn was skipped: Claude Code in WSL was not signed in (its April login had expired) |
 
