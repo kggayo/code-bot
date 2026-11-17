@@ -60,6 +60,7 @@ jobs:
           name: code-bot-${{ matrix.os }}
           path: |
             release/*.exe
+            release/*.zip
             release/*.AppImage
             release/*.deb
           if-no-files-found: error

@@ -152,6 +152,25 @@ Windows, `~/Library/Application Support/code-bot` on macOS, `~/.config/code-bot`
 on Linux): `data/code-bot.db`, `main-bot/` (the main bot's empty working
 folder) and `worktrees/` (sub-agents' git worktrees).
 
+## Releasing
+
+Releases are built by GitHub Actions from a version tag, never uploaded from a
+developer's machine:
+
+1. Raise the version in `package.json` and `src/core/version.ts` (a test checks
+   they match) and commit.
+2. `git tag -a vX.Y.Z -m "code-bot X.Y.Z"` on that commit, then
+   `git push origin main vX.Y.Z`.
+3. `.github/workflows/release.yml` checks the tag matches `package.json`, runs
+   the type checks and tests, builds on Windows (`code-bot-Setup-X.Y.Z.exe` and
+   `code-bot-X.Y.Z-win-x64.zip`) and Linux (`code-bot-X.Y.Z.AppImage` and
+   `code-bot_X.Y.Z_amd64.deb`), and publishes the release with
+   `.github/release-notes.md` as its text.
+
+Push tags as the owner's personal account like any push (see the start of this
+file). A failed run leaves no release: fix, move the tag
+(`git tag -fa`, `git push -f origin vX.Y.Z`) and it runs again.
+
 ## Where things are
 
 | Path | What |
@@ -168,6 +187,7 @@ folder) and `worktrees/` (sub-agents' git worktrees).
 | `scripts/make-icons.mjs`, `build/` | The app icon: `build/icon.svg` and the PNG/ICO files made from it. |
 | `scripts/wsl-sync.sh` | Copies the checkout into WSL for Linux builds and checks. |
 | `.github/workflows/build.yml` | CI for Windows and Linux on every push to `main` and every pull request: typecheck, tests, end-to-end, installers (as artifacts). |
+| `.github/workflows/release.yml`, `.github/release-notes.md` | Publishes a GitHub release with the installers when a version tag is pushed; the notes file is the release text. |
 | `docs/architecture.md` | Components, the three levels, routing rules, lifecycle, security model. |
 | `docs/api.md` | Operations, events and bot tools: the contract between window and core. |
 | `docs/decisions.md` | Why things are the way they are, including what was rejected and replaced. |

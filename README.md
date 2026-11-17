@@ -26,19 +26,42 @@ work at once, earlier conversations to read or continue, archiving (by hand or
 after 30 days), "Open in terminal" to continue a sub-agent's session yourself,
 and a banner with a Sign in button when a coding agent is not signed in.
 
-## Run it
+## Install
 
-Needs Node 24 or newer for development, and Claude signed in on the machine
-(see [Signing in](#signing-in) below).
+Download the latest release from
+[Releases](https://github.com/kggayo/code-bot/releases/latest):
+
+- **Windows 10 or 11 (64-bit):** run `code-bot-Setup-<version>.exe`. It installs
+  code-bot for your user (no admin rights needed) and adds it to the Start
+  menu. Or unzip `code-bot-<version>-win-x64.zip` anywhere and run
+  `code-bot.exe`, without installing. The files are not code-signed yet, so
+  Windows may say "Windows protected your PC": choose **More info**, then
+  **Run anyway**.
+- **Ubuntu or Debian (64-bit):** `sudo apt install ./code-bot_<version>_amd64.deb`.
+- **Other Linux (64-bit):** make `code-bot-<version>.AppImage` executable
+  (`chmod +x`) and run it. Ubuntu 24.04 needs `sudo apt install libfuse2t64`
+  first.
+- **macOS:** not built yet.
+
+Then sign in to Claude (see [Signing in](#signing-in)), click
+**+ New project bot**, give it a name and a one-line description (the main bot
+routes by them), add the project's folder(s), choose models, effort and
+permissions, and talk to it or to the main bot. Projects whose sub-agents use
+their own git worktrees need git on the PATH.
+
+## Run from source
+
+For working on code-bot itself. Needs Node 24 or newer, and Claude signed in on
+the machine.
 
 ```bash
 npm install
 npm run dev
 ```
 
-In the window: **+ New project bot**, give it a name and a one-line description
-(the main bot routes by them), add the project's folder(s), choose models,
-effort and permissions, then talk to it or to the main bot.
+`npm run <name>` runs a script defined in `package.json`: `dev` starts code-bot
+from the source code, with live reload as you change it. `npm start` builds it
+and runs it as the installed app would.
 
 To try the app without using any model, start it in demo mode with scripted
 bots and mock sub-agents:
@@ -92,10 +115,11 @@ ready.
 npm run package
 ```
 
-builds for the platform you run it on (NSIS installer on Windows, DMG on
+builds for the platform you run it on (installer and zip on Windows, DMG on
 macOS, AppImage and deb on Linux) into `release/`. Builds are unsigned for
 now: fine on your own machines; see decision 26 in `docs/decisions.md` before
-sharing them. On Windows, the Linux build can be made in WSL:
+sharing them. Published releases are built by GitHub Actions when a version tag
+is pushed (see "Releasing" in [AGENTS.md](AGENTS.md)). On Windows, the Linux build can be made in WSL:
 `wsl -d Ubuntu --exec bash scripts/wsl-sync.sh`, then `npm ci` and
 `npm run package:linux` in `~/code-bot-linux`.
 

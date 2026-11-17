@@ -21,12 +21,17 @@ asarUnpack:
   - node_modules/@anthropic-ai/claude-agent-sdk-*/**
 # No native modules: SQLite is built into Electron's Node.
 npmRebuild: false
+# Windows: an installer (per user, no admin rights needed) and a portable zip
+# (unzip anywhere, run code-bot.exe). Names without spaces, for release downloads.
 win:
   target:
     - nsis
+    - zip
+  artifactName: ${productName}-${version}-win-${arch}.${ext}
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+  artifactName: ${productName}-Setup-${version}.${ext}
 mac:
   target:
     - dmg
@@ -39,5 +44,5 @@ linux:
   category: Development
   executableName: code-bot
   synopsis: Orchestrates coding agents on your own machine
-  description: A main bot routes your requests to project bots, which run Claude Code (or Codex) sub-agents in your project folders.
+  description: A main bot routes your requests to project bots, which run Claude Code, Codex or OpenCode sub-agents in your project folders.
   maintainer: code-bot
