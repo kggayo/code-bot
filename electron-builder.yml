@@ -44,5 +44,5 @@ linux:
   category: Development
   executableName: code-bot
   synopsis: Orchestrates coding agents on your own machine
-  description: A main bot routes your requests to project bots, which run Claude Code, Codex or OpenCode sub-agents in your project folders.
+  description: A main bot routes your requests to project bots, which run Claude Code or Codex sub-agents in your project folders.
   maintainer: code-bot

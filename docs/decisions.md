@@ -19,7 +19,6 @@ the owner's requirements (see `AGENTS.md`):
 | OpenClaw | Per-project agents with a coordinator, chat channels | Cannot force a model on an external harness such as Claude Code; does not relay Claude Code's permission prompts (they fail or are auto-approved). Long list of security advisories. |
 | Hermes Agent | Native approvals and per-profile model settings | Its workers are Hermes itself, not Claude Code sessions. |
 | Claude Code Remote Control (`claude remote-control`) | Per-project sessions driven from the Claude apps, per-session model and effort | No main bot that routes work, no project bot that delegates, Claude only, one server per project folder. |
-| OpenCode (`opencode serve`) | Per-agent model config | Stays inside one project. |
 | Agent Orchestrator, Paseo, Happy, cc-connect | Agents on your own machine with a remote client | No cross-project router bot; effort settings undocumented. |
 
 What the owner disliked about Grok Bot is exactly what this design fixes: there
@@ -35,7 +34,7 @@ hierarchy.
 Sources: https://docs.openclaw.ai/tools/acp-agents/ ,
 https://docs.openclaw.ai/tools/acp-agents-setup ,
 https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban ,
-https://code.claude.com/docs/en/remote-control , https://opencode.ai/docs/server/ ,
+https://code.claude.com/docs/en/remote-control ,
 https://docs.x.ai/grok-bot/faq
 
 ## 2. Interface: private web page plus HTTP API (2026-11-16) — superseded by 13
@@ -55,7 +54,7 @@ directly in Node 24 for the tests. The desktop app is built with electron-vite
 (entry 18).
 
 **Why:** the Claude Agent SDK is first-class in TypeScript, and the likely next
-engines (Codex, OpenCode) have TypeScript SDKs. `node:sqlite` means no native
+engine (Codex) has a TypeScript SDK. `node:sqlite` means no native
 modules: verified on 2026-11-17 that Electron 45.3.3 ships Node 24.22.3 with
 `node:sqlite` working, so the same storage code runs in the tests and in the
 app, with nothing to rebuild per Electron version.
@@ -420,33 +419,7 @@ notarization.
 bundled `claude.exe`; exclude it (`win.signExts`) and check that the signature
 is still Anthropic's.
 
-## 27. OpenCode runs through `opencode serve` (2026-11-17)
-
-**Decided:** the OpenCode engine (`src/core/engines/opencode.ts`) starts
-`opencode serve` per run on 127.0.0.1 with a random password and drives it over
-HTTP and server-sent events, following the server's OpenAPI document for
-OpenCode 1.1.33. Permission modes go into `OPENCODE_PERMISSION` in that
-process's environment; the user's OpenCode config files are never written.
-
-**Why not `opencode acp`:** in 1.1.33 the ACP bridge is itself a client of the
-same HTTP server (started without a password), does not pass on OpenCode's
-question tool (a question would wait forever) and reports no cost.
-
-**Verified** (`scripts/opencode-check.ts`): against the real OpenCode server, a
-new session created a file after an approval in permission mode `default`,
-resuming the session remembered it, and an interrupt ended the run in under a
-second; the user's config files were unchanged. The model was a scripted one
-served locally to OpenCode: every free OpenCode model on the owner's PC
-answered "Free usage limit reached" (a daily limit, reset at midnight UTC), so
-no real model completed a turn. Questions, plan mode, steering and `maxTurns`
-were also tried against the real server. The engine's tests use a fake server
-(`test/fixtures/fake-opencode.ts`).
-
-**Known catches:** OpenCode rewrites `~/.config/opencode/package.json` and
-`bun.lock` itself when it starts; a crash of code-bot leaves a running
-`opencode serve` behind.
-
-## 28. Open source on the owner's personal GitHub, MIT (2026-11-17)
+## 27. Open source on the owner's personal GitHub, MIT (2026-11-17)
 
 **Decided:** the code lives at https://github.com/kggayo/code-bot, public, under
 the MIT license (GitHub's template, `LICENSE`), on the owner's personal account

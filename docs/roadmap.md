@@ -17,12 +17,12 @@ in the status table in `AGENTS.md`; the reasoning is in `docs/decisions.md`
 | 1.3 One git worktree per sub-agent | Built (decision 20). |
 | 1.4 Sign-in check | Built: banner with Sign in, and the engines in Settings. |
 | 1.4 Try `auto` permissions | Works on the owner's plan; `acceptEdits` stays the default (decision 25). |
-| 1.4 Open in a terminal | Built for Claude Code, Codex and OpenCode. |
+| 1.4 Open in a terminal | Built for Claude Code and Codex. |
 | 1.4 Requests that survive a restart | Built, engine-independent (decision 19). |
 | 1.4 Limits | Built: turns per run, budget per sub-agent, sub-agents at once (decision 21). |
 | 1.4 Retention | Built: archive by hand or after 30 days; deletion opt-in (decision 22). |
 | 1.4 Earlier conversations | Built: list, read, reopen, archive. |
-| 1.5 More engines | Codex built and verified through the app with real Codex (decision 24). OpenCode built and verified against the real OpenCode server with a scripted model (decision 27). |
+| 1.5 More engines | Codex built and verified through the app with real Codex (decision 24). |
 
 ### Still open after Milestone 1
 
@@ -32,13 +32,6 @@ in the status table in `AGENTS.md`; the reasoning is in `docs/decisions.md`
   `openTerminal` on macOS (a `.command` file opened in Terminal) is untested.
 - **Signing** when the app is shared (decision 26 lists the options and the
   `claude.exe` signature catch).
-- **OpenCode with a real model.** Run `node scripts/opencode-check.ts` when the
-  free models' daily limit has reset (it tries `opencode/big-pickle` first), or
-  with a provider signed in (`opencode auth login`), and once through the app.
-- **Orphaned OpenCode servers.** If code-bot crashes, a running sub-agent's
-  `opencode serve` stays up; code-bot could stop leftovers on its next start.
-- **Shared process helpers.** `codex.ts` and `opencode.ts` each carry a copy of
-  the helpers that find and spawn a program; they could move to one module.
 - **Merging from the app.** Today a sub-agent's branch is handed over or merged
   by another sub-agent; a "merge into the project folder" button for the user
   is a possible addition.

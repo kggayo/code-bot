@@ -70,7 +70,6 @@ sub-agent (but can open one and write to it).
 | `src/core/engines/claude.ts` | Claude Code through the Claude Agent SDK. |
 | `src/core/engines/claude-input.ts` | `InputQueue`: streaming input to a Claude Code process. |
 | `src/core/engines/codex.ts` | OpenAI Codex through `codex app-server`. |
-| `src/core/engines/opencode.ts` | OpenCode through `opencode serve`. |
 | `src/core/engines/mock.ts` | `MockEngine`: scripted sub-agent for tests and demo mode. |
 | `src/core/git.ts` | Read-only git runner for project bots. |
 | `src/core/store.ts` | SQLite persistence (`node:sqlite`, synchronous). Tables `bots`, `threads`, `tasks`, `events`, `requests`, `settings`. Schema version in `PRAGMA user_version`, upgraded by the `MIGRATIONS` list. |
@@ -313,36 +312,6 @@ folder, the file and its change) in `input`, and put the agent's reasoning in
 - `check()` runs `codex login status`; signing in is `codex login`. The binary is
   `CODE_BOT_CODEX_EXECUTABLE`, else `codex` on the PATH (a `codex.cmd` npm shim
   runs through `cmd.exe` with fixed arguments).
-
-### OpenCode engine specifics
-
-- `src/core/engines/opencode.ts` starts `opencode serve` per run, in the run's
-  folder, on 127.0.0.1 with a port the OS picks and a random password (HTTP
-  basic auth), and follows its server-sent events (`GET /event`). Not
-  `opencode acp`: in 1.1.33 that is a client of the same server, started without
-  a password, and it drops OpenCode's question tool and costs.
-- A session is opened (`POST /session`, or `GET /session/:id` to continue) and
-  the prompt sent with the model (`provider/model`), agent (`plan` in plan
-  mode, else `build`), `instructions` as the message's `system` text, and
-  `effort` as the model's variant of that name when it has one.
-- `permission.asked` (also from its sub-sessions) goes to `askUser` as
-  `permission`; `question.asked` (OpenCode's question tool) as
-  `AskUserQuestion`. A refusal always carries a reason, because without one
-  OpenCode stops the whole turn.
-- Permission modes reach OpenCode through `OPENCODE_PERMISSION` in the server's
-  environment, never through the user's config files: `plan` denies edits and
-  commands; `default` asks for both; `acceptEdits` and `auto` allow edits and
-  ask for commands; `bypassPermissions` allows everything.
-- `send()` steers the running turn (a message OpenCode reads before its next
-  model call). `maxTurns` (model calls) and `maxBudgetUsd` (OpenCode prices
-  calls from models.dev) are enforced by aborting the turn; `costUsd` is the
-  session's cost. A retry OpenCode would wait more than two minutes for (rate
-  limits, the free models' daily limit) ends the turn with OpenCode's reason.
-- `check()` finds the program (the native binary behind the npm `opencode.cmd`
-  shim); free models need no sign-in. `resumeCommand` is
-  `opencode --session <id>`.
-- If code-bot itself crashes, the `opencode serve` process of a running
-  sub-agent keeps running: OpenCode does not watch its parent.
 
 ### Bot brains
 

@@ -1,6 +1,6 @@
 /**
  * The contract every coding agent ("engine") implements, so sub-agents can be
- * Claude Code, Codex, OpenCode or anything else without the core knowing.
+ * Claude Code, Codex or anything else without the core knowing.
  */
 import type { UserResponse } from '../../shared/types.ts';
 

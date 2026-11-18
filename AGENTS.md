@@ -1,7 +1,7 @@
 # code-bot: guide for coding agents
 
 Read this file first. It is the handoff document for any coding agent (Claude
-Code, Codex, OpenCode, or a person) picking up this project. `CLAUDE.md`
+Code, Codex, or a person) picking up this project. `CLAUDE.md`
 imports it, so there is one source of truth.
 
 ## What this is
@@ -15,7 +15,7 @@ coding agents on the owner's own machine, in three levels:
   its own models, permissions and instructions. The team lead / architect: it
   reads the code, starts sub-agents, answers their questions when it can,
   reviews their work and reports to whoever asked.
-- **Sub-agent**: a coding agent (Claude Code, Codex or OpenCode) doing one task in the
+- **Sub-agent**: a coding agent (Claude Code or Codex) doing one task in the
   project's folders (or its own git worktree), reporting to its project bot.
 
 The owner talks only to the main bot or a project bot.
@@ -64,11 +64,10 @@ and verified:
 
 | Piece | How it was verified |
 |---|---|
-| Core: bot hierarchy and routing, report-back to whoever asked, question relay through the project bot, approvals to the user, sub-agent lifecycle, restart recovery, requests held across a restart, limits, settings, worktrees, archive and retention, earlier conversations, engine checks, validation, canonical folders, read-only git; the Codex and OpenCode engines against fakes | `npm test`: 63 tests with scripted bots, mock sub-agents and fake Codex and OpenCode servers, no model usage. Windows: 63 pass. Linux: 61 pass, 2 Windows-only tests skipped |
+| Core: bot hierarchy and routing, report-back to whoever asked, question relay through the project bot, approvals to the user, sub-agent lifecycle, restart recovery, requests held across a restart, limits, settings, worktrees, archive and retention, earlier conversations, engine checks, validation, canonical folders, read-only git; the Codex engine against a fake app-server | `npm test`: 48 tests with scripted bots, mock sub-agents and a fake Codex app-server, no model usage. Windows: 48 pass. Linux: 47 pass, 1 Windows-only test skipped |
 | Desktop app with scripted models | `npm run e2e`: 14 checks on Windows and on Linux (WSLg): bots, routing, approvals and questions in the right conversation, sub-agent panel, settings, worktree sub-agent with limits and archiving, reading and continuing an earlier conversation, app settings and engine check, no page errors |
 | Desktop app with real models (Claude haiku and a cheap Codex model, low effort) | `npm run live` on Windows, with `CODE_BOT_LIVE_CODEX=1`, 10 steps: sign-in check; main bot → project bot → report (answer from the project's `CLAUDE.md`); a sub-agent writes a file after an approval; a sub-agent in its own worktree commits on its branch while the project folder stays untouched, and the project bot names the branch; the sub-agent ran on the configured model; a project bot with Codex sub-agents: a Codex sub-agent creates a file after an approval, and a follow-up from the project bot continues the same Codex session |
 | `auto` permission mode | `scripts/auto-mode-check.ts` (haiku, on the owner's Claude subscription): a file write and two commands ran without approval requests (decision 25) |
-| OpenCode engine | `scripts/opencode-check.ts` against the real OpenCode 1.1.33 server with a scripted local model (the free models had reached their daily limit): a file created after an approval, the session resumed, an interrupt ending the run in under a second, the user's config untouched; `test/opencode.test.ts` (15 tests) against a fake server. Wired into the app; no real model turn yet (decision 27) |
 | Codex engine | Through the app (above), and `scripts/codex-check.ts` against real Codex 0.160.1 (ChatGPT login, cheap model): a file created after an approval, a resumed thread that remembers it, a question relayed through `askUser` and answered; `test/codex.test.ts` (12 tests) against a fake app-server |
 | Open in terminal | The launcher (`src/desktop/main/terminal.ts`) starts a detached program in the given folder on Windows; the interactive Claude/Codex session it opens was not driven by a test |
 | Packaged Windows app | `electron-builder --win` + `scripts/packaged-check.ts`: starts, the sign-in check runs its unpacked Claude Code, a real main-bot turn runs. App icon. Unsigned. |
@@ -97,7 +96,6 @@ npm run live         # builds, then drives the app with real Claude (haiku); use
 npm run package      # installer for the current platform into release/
 npx electron-builder --dir --publish never && node scripts/packaged-check.ts   # quick check of a packaged build
 node scripts/codex-check.ts          # the Codex engine against real Codex (uses Codex usage)
-node scripts/opencode-check.ts       # the OpenCode engine against real OpenCode (free model, or a scripted one)
 node scripts/auto-mode-check.ts      # Claude Code "auto" permissions on this login (uses model usage)
 npx electron scripts/make-icons.mjs  # regenerate build/ icons from build/icon.svg
 ```
@@ -140,14 +138,12 @@ Environment variables (read by `src/desktop/main/index.ts` and the engines):
 | `CODE_BOT_ENABLE_MOCK_ENGINE=1` | Offer the mock engine next to Claude Code. |
 | `CODE_BOT_CLAUDE_EXECUTABLE` | Use this Claude Code binary instead of the one bundled with the Agent SDK. |
 | `CODE_BOT_CODEX_EXECUTABLE` | Use this Codex binary instead of `codex` on the PATH. |
-| `CODE_BOT_OPENCODE_EXECUTABLE` | Use this OpenCode binary instead of `opencode` on the PATH. |
 | `CODE_BOT_NO_QUIT_PROMPT=1` | Quit without asking even while sub-agents work (tests). |
 
 Claude Code must be signed in on the machine for real use. The app checks on
 start-up and shows a banner with a Sign in button (it opens a terminal running
 `claude auth login`); `claude auth status` shows the state. Codex sub-agents
-need the Codex CLI signed in (`codex login`); OpenCode sub-agents need OpenCode
-installed (its free models need no sign-in; others: `opencode auth login`).
+need the Codex CLI signed in (`codex login`).
 
 The app keeps its data in the OS app-data folder (`%APPDATA%\code-bot` on
 Windows, `~/Library/Application Support/code-bot` on macOS, `~/.config/code-bot`
@@ -177,7 +173,7 @@ file). A failed run leaves no release: fix, move the tag
 
 | Path | What |
 |---|---|
-| `src/core/` | The orchestrator. No Electron imports: it must stay runnable headless. Start with `code-bot.ts`; `tasks.ts` runs sub-agents, `worktrees.ts` their git worktrees, `engines/` the coding agents (`claude.ts`, `codex.ts`, `opencode.ts`, `mock.ts`). |
+| `src/core/` | The orchestrator. No Electron imports: it must stay runnable headless. Start with `code-bot.ts`; `tasks.ts` runs sub-agents, `worktrees.ts` their git worktrees, `engines/` the coding agents (`claude.ts`, `codex.ts`, `mock.ts`). |
 | `src/shared/types.ts` | Every type shared by core, main, preload and renderer, including `CodeBotApi` and the event shapes. |
 | `src/desktop/main/` | Electron main process: window, IPC (`ipc.ts`), terminals (`terminal.ts`), quit handling. |
 | `src/desktop/preload/` | The `window.codeBot` bridge. |
@@ -185,7 +181,7 @@ file). A failed run leaves no release: fix, move the tag
 | `test/` | `node:test` suites for the core. `helpers.ts` has `setup`, `TestBrain` (scripted, with per-bot overrides) and waiters. |
 | `scripts/e2e.ts`, `scripts/live-check.ts` | Playwright drives the built app: scripted models, then real Claude. |
 | `scripts/packaged-check.ts` | Starts the packaged app from `release/` and runs one real model turn, proving it finds its unpacked Claude Code. |
-| `scripts/codex-check.ts`, `scripts/opencode-check.ts`, `scripts/auto-mode-check.ts` | Live checks of the Codex and OpenCode engines and of Claude Code's `auto` mode. |
+| `scripts/codex-check.ts`, `scripts/auto-mode-check.ts` | Live checks of the Codex engine and of Claude Code's `auto` mode. |
 | `scripts/make-icons.mjs`, `build/` | The app icon: `build/icon.svg` and the PNG/ICO files made from it. |
 | `scripts/wsl-sync.sh` | Copies the checkout into WSL for Linux builds and checks. |
 | `.github/workflows/build.yml` | CI for Windows and Linux on every push to `main` and every pull request: typecheck, tests, end-to-end, installers (as artifacts). |

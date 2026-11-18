@@ -8,7 +8,6 @@ import type { Brain } from '../../core/brain.ts';
 import { CodeBot } from '../../core/code-bot.ts';
 import { ClaudeEngine, bundledClaudeExecutable } from '../../core/engines/claude.ts';
 import { CodexEngine } from '../../core/engines/codex.ts';
-import { OpenCodeEngine } from '../../core/engines/opencode.ts';
 import { MockEngine } from '../../core/engines/mock.ts';
 import type { Engine } from '../../core/engines/types.ts';
 import { ScriptedBrain } from '../../core/scripted-brain.ts';
@@ -27,7 +26,6 @@ import { registerIpc } from './ipc.ts';
  *   CODE_BOT_ENABLE_MOCK_ENGINE=1  offer the mock engine next to Claude Code
  *   CODE_BOT_CLAUDE_EXECUTABLE  Claude Code binary to use instead of the bundled one
  *   CODE_BOT_CODEX_EXECUTABLE   Codex binary to use instead of codex on the PATH
- *   CODE_BOT_OPENCODE_EXECUTABLE  OpenCode binary to use instead of opencode on the PATH
  *   CODE_BOT_NO_QUIT_PROMPT=1   quit without asking even when sub-agents are working
  */
 
@@ -137,11 +135,9 @@ function start(): void {
   const dataDir = join(userData, 'data');
   store = new Store(dataDir);
   const executable = claudeExecutable();
-  // Sub-agent engines: Claude Code (the default for new projects), Codex and OpenCode. The others are
-  // offered even when not installed; a project that picks one then sees why it cannot run in the banner.
-  const engines: Engine[] = fakeModels
-    ? [new MockEngine()]
-    : [new ClaudeEngine({ executable }), new CodexEngine(), new OpenCodeEngine()];
+  // Sub-agent engines: Claude Code (the default for new projects) and Codex. Codex is offered even when
+  // it is not installed; a project that picks it then sees why it cannot run in the banner.
+  const engines: Engine[] = fakeModels ? [new MockEngine()] : [new ClaudeEngine({ executable }), new CodexEngine()];
   if (!fakeModels && process.env.CODE_BOT_ENABLE_MOCK_ENGINE === '1') engines.push(new MockEngine());
   const brain: Brain = fakeModels ? new ScriptedBrain() : new ClaudeBrain({ executable });
   core = new CodeBot({

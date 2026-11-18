@@ -24,7 +24,7 @@ are `CodeBotError` with a `code`: `invalid`, `not_found`, `conflict` or `busy`.
   "model": "opus",                 // the bot's own model; null = engine default
   "effort": "high",                // low | medium | high | xhigh | max | null
   "subagents": {
-    "engine": "claude",            // "claude", "codex", "opencode" (or "mock" in demo mode)
+    "engine": "claude",            // "claude" or "codex" (or "mock" in demo mode)
     "model": "sonnet", "effort": "medium",
     "permissionMode": "acceptEdits", // plan | default | acceptEdits | auto | bypassPermissions
     "isolation": "worktree",       // "shared" (the project folders) or "worktree" (own git worktree and branch)
@@ -101,7 +101,7 @@ id (`scope: bot`) or `"app"` (`scope: app`).
 | `appInfo()` | `{ version, dataDir, platform, fakeModels, engines }`. |
 | `getSettings()` | The app settings (`AppSettings`). |
 | `updateSettings(patch)` | Changes them: `maxActiveSubagents` 1-50, `archiveAfterDays` and `deleteArchivedAfterDays` 0-3650 (0: never). |
-| `checkEngines()` | `EngineInfo[]`: whether each coding agent is installed and signed in. Runs `claude auth status`, `codex login status` and finds `opencode`; no model usage. |
+| `checkEngines()` | `EngineInfo[]`: whether each coding agent is installed and signed in. Runs `claude auth status` and `codex login status`; no model usage. |
 | `listBots()` | Every bot with its status: the main bot first, then project bots by name. |
 | `createBot(input)` | Creates a project bot. Validates name, folders (absolute, existing, at most 10), engine, effort, permission mode, isolation, files to copy (relative, inside the folder, at most 30), turn limit (1-10000) and budget (> 0). Folders are stored as canonical paths (`realpath`), so Windows short names (`C:\Users\ABCDEF~1\…`) and symlinks become the real path. |
 | `updateBot(botId, patch)` | Changes a bot. For the main bot only `model`, `effort` and `instructions` apply. |
@@ -127,7 +127,7 @@ id (`scope: bot`) or `"app"` (`scope: app`).
 | `openPath(path)` | Desktop only: shows a bot's folder or a sub-agent's worktree in the file manager. |
 | `notify({ title, body, botId? })` | Desktop only: a system notification; clicking it opens the bot. |
 | `signIn(engineId)` | Desktop only: opens a terminal running the agent's sign-in (`claude auth login`, `codex login`). |
-| `openInTerminal(taskId)` | Desktop only: opens a terminal in the sub-agent's folder that continues its session interactively (`claude --resume <id>`, `codex resume <id>`, `opencode --session <id>`). Refused while it is working. |
+| `openInTerminal(taskId)` | Desktop only: opens a terminal in the sub-agent's folder that continues its session interactively (`claude --resume <id>`, `codex resume <id>`). Refused while it is working. |
 
 For questions, `answers` maps each question's exact text to the chosen option
 label or free text; several labels for a multi-select question are joined with

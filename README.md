@@ -11,7 +11,7 @@ agents that do the work:
   their own models, permissions and instructions. Each is the team lead: it
   reads the code, starts **sub-agents** (developers and QA) to do the work,
   answers their questions when it can, reviews their reports and reports back.
-- **Sub-agents**: full coding agents (Claude Code, Codex or OpenCode; others can be
+- **Sub-agents**: full coding agents (Claude Code or Codex; others can be
   plugged in) working in the project folders on your machine, with your `.env`
   files, databases and tools. Each project bot can run several at once, each
   with its own model and effort, optionally each in its own git worktree and
@@ -103,10 +103,6 @@ agent"):
   with `codex login status`. Once a project uses Codex, the banner offers
   **Sign in** for it too.
 
-**OpenCode**, only for projects that use it: install it with
-`npm install -g opencode-ai`. Its free models need no sign-in; for other
-providers, run `opencode auth login`.
-
 **⚙ Settings → Coding agents on this computer** shows whether each agent is
 ready.
 
@@ -132,7 +128,6 @@ npm test            # core tests, no model usage
 npm run e2e         # drives the built app with scripted models
 npm run live        # drives the built app with real Claude (haiku), in a throwaway folder
 node scripts/codex-check.ts        # the Codex engine against real Codex
-node scripts/opencode-check.ts     # the OpenCode engine against real OpenCode
 node scripts/auto-mode-check.ts    # Claude Code's "auto" permissions on your login
 npx electron scripts/make-icons.mjs  # icons in build/ from build/icon.svg
 ```

@@ -1,4 +1,4 @@
-code-bot is a desktop app that orchestrates coding agents on your own computer. You talk to a main bot, or to a project bot. Each project bot runs sub-agents (Claude Code, Codex or OpenCode) in your project folders, and reports back with their results, questions and approval requests.
+code-bot is a desktop app that orchestrates coding agents on your own computer. You talk to a main bot, or to a project bot. Each project bot runs sub-agents (Claude Code or Codex) in your project folders, and reports back with their results, questions and approval requests.
 
 ## Download
 
@@ -16,7 +16,7 @@ The Windows files are not code-signed yet, so Windows may show "Windows protecte
 ## Before you start
 
 - **Sign in to Claude** on your computer: the main bot and the project bots run on it. code-bot shows a **Sign in** button when you are not signed in. See [Signing in](https://github.com/kggayo/code-bot#signing-in).
-- Codex or OpenCode only if a project uses them for its sub-agents.
+- **Codex** only if a project uses it for its sub-agents: install the Codex CLI and run `codex login`.
 - **git** on the PATH, for projects whose sub-agents work in their own git worktrees.
 
 Then click **+ New project bot**, add a project folder, and talk to it or to the main bot.
