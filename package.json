@@ -1,6 +1,6 @@
 {
   "name": "code-bot",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Desktop code orchestrator: a main bot that hands work to project bots, which run coding sub-agents in your project folders.",
   "author": "code-bot",
