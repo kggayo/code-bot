@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { CanUseTool, EffortLevel, Options, PermissionMode } from '@anthropic-ai/claude-agent-sdk';
 import { InputQueue } from './claude-input.ts';
+import { allowedServers, launchCommand } from '../mcp.ts';
 import { CLIENT_APP } from '../version.ts';
 import type {
   AskUser,
@@ -14,6 +15,7 @@ import type {
   EngineRun,
   EngineRunOptions,
   EngineUsageReport,
+  McpServer,
   TerminalCommand,
   UsageWindow,
 } from './types.ts';
@@ -121,6 +123,28 @@ function limitLabel(row: Json): string {
 }
 
 /** The plan's limit windows from Claude Code's /usage data, newest format first. */
+/**
+ * The project's MCP servers as Agent SDK options. They come on top of the servers Claude Code
+ * loads from the user's settings; a rule "mcp__<name>" in allowedTools lets every tool of a
+ * server run without asking (canUseTool is then not called for them).
+ */
+export function claudeMcpOptions(
+  servers: readonly McpServer[] | undefined,
+  permissionMode: string | undefined,
+  platform: NodeJS.Platform = process.platform,
+): Pick<Options, 'mcpServers' | 'allowedTools'> {
+  if (!servers?.length) return {};
+  const mcpServers: NonNullable<Options['mcpServers']> = {};
+  for (const server of servers) {
+    mcpServers[server.name] =
+      server.type === 'http'
+        ? { type: 'http', url: server.url }
+        : { type: 'stdio', ...launchCommand(server.command, server.args, platform) };
+  }
+  const allowed = allowedServers(servers, permissionMode).map((server) => `mcp__${server.name}`);
+  return allowed.length ? { mcpServers, allowedTools: allowed } : { mcpServers };
+}
+
 export function claudeUsageWindows(rateLimits: unknown): UsageWindow[] {
   if (!isRecord(rateLimits)) return [];
   if (Array.isArray(rateLimits.limits) && rateLimits.limits.length > 0) {
@@ -296,6 +320,7 @@ export class ClaudeEngine implements Engine {
         ? { type: 'preset', preset: 'claude_code', append: options.instructions }
         : { type: 'preset', preset: 'claude_code' },
       tools: { type: 'preset', preset: 'claude_code' },
+      ...claudeMcpOptions(options.mcpServers, permissionMode),
       pathToClaudeCodeExecutable: this.executable,
       abortController,
       env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: CLIENT_APP },

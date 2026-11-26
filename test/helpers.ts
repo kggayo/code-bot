@@ -22,6 +22,7 @@ export function mockSubagents(extra: Partial<SubagentDefaults> = {}): SubagentDe
     worktreeFiles: ['.env', '.env.*'],
     maxTurns: null,
     maxBudgetUsd: null,
+    mcpServers: [],
     ...extra,
   };
 }

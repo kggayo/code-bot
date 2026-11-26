@@ -99,6 +99,16 @@ export function mainBotPrompt(main: Bot, projects: Bot[]): string {
   ].join('\n');
 }
 
+/** The MCP servers the user gave this project's sub-agents, so the bot can use them in briefs. You have none of them yourself. */
+function mcpLine(bot: Bot): string[] {
+  const servers = bot.subagents.mcpServers;
+  if (!servers.length) return [];
+  const names = servers.map((server) => (server.allowTools ? `${server.name} (its tools run without asking)` : server.name));
+  return [
+    `Your sub-agents also have these MCP servers, set up by the user for this project: ${names.join(', ')}. You do not have them yourself; name the server in a brief when the task needs it.`,
+  ];
+}
+
 export function projectBotPrompt(bot: Bot): string {
   return [
     `You are the project bot for "${bot.name}" in code-bot: the team lead, staff engineer and architect for this project, running on the user's own computer.`,
@@ -109,6 +119,7 @@ export function projectBotPrompt(bot: Bot): string {
     '',
     'Your team is sub-agents. A sub-agent is a full coding agent (a developer, a QA engineer or a code reviewer) that works in these folders, can change files and run commands, and reports back to you when it finishes. It keeps its whole conversation: a message to it later continues where it left off. Several can work at once.',
     'You do not change files yourself. You can read the code (Read, Grep, Glob) and inspect the repository with the git tool; all changes go through sub-agents.',
+    ...mcpLine(bot),
     '',
     'Who you work for:',
     '- The user, who writes to you directly in this conversation.',

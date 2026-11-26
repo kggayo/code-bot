@@ -2,9 +2,9 @@
  * The contract every coding agent ("engine") implements, so sub-agents can be
  * Claude Code, Codex or anything else without the core knowing.
  */
-import type { UsageWindow, UserResponse } from '../../shared/types.ts';
+import type { McpServer, UsageWindow, UserResponse } from '../../shared/types.ts';
 
-export type { UsageWindow, UserResponse };
+export type { McpServer, UsageWindow, UserResponse };
 
 export interface EngineRunOptions {
   /** Directory the agent starts in. */
@@ -28,6 +28,11 @@ export interface EngineRunOptions {
   maxTurns?: number;
   /** Stop this run once its estimated cost passes this many US dollars. Engines that cannot enforce it ignore it. */
   maxBudgetUsd?: number;
+  /**
+   * MCP servers to add to the ones the agent loads from the user's own setup (src/core/mcp.ts
+   * has the shared rules: how to start a command, which servers' tools may run without asking).
+   */
+  mcpServers?: McpServer[];
 }
 
 export type EngineEvent =

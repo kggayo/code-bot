@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { joinCommandLine, splitCommandLine } from '../../../../shared/command-line.ts';
 import { DEFAULT_WORKTREE_FILES, EFFORTS, PERMISSION_MODES } from '../../../../shared/types.ts';
-import type { BotInput, BotView, Effort, Isolation, PermissionMode } from '../../../../shared/types.ts';
+import type { BotInput, BotView, Effort, Isolation, McpServer, PermissionMode } from '../../../../shared/types.ts';
 import { api } from '../api.ts';
 import { PERMISSION_LABEL } from '../format.ts';
 import { useAppState } from '../state.ts';
@@ -25,6 +26,7 @@ function blank(engine: string): BotInput {
       worktreeFiles: [...DEFAULT_WORKTREE_FILES],
       maxTurns: null,
       maxBudgetUsd: null,
+      mcpServers: [],
     },
   };
 }
@@ -45,6 +47,94 @@ function fromBot(bot: BotView): BotInput {
     effort: bot.effort,
     subagents: { ...bot.subagents, worktreeFiles: [...bot.subagents.worktreeFiles] },
   };
+}
+
+/** An MCP server as edited: a command line or an address in one field. */
+interface ServerRow {
+  key: number;
+  name: string;
+  line: string;
+  allowTools: boolean;
+}
+
+function toRows(servers: McpServer[]): ServerRow[] {
+  return servers.map((server, index) => ({
+    key: index,
+    name: server.name,
+    line: server.type === 'http' ? server.url : joinCommandLine([server.command, ...server.args]),
+    allowTools: server.allowTools,
+  }));
+}
+
+/** The rows as servers: a line starting with http:// or https:// is an address, anything else a command. Empty rows are left out. */
+function fromRows(rows: ServerRow[]): McpServer[] {
+  return rows
+    .filter((row) => row.name.trim() || row.line.trim())
+    .map((row): McpServer => {
+      const name = row.name.trim();
+      const line = row.line.trim();
+      if (/^https?:\/\//i.test(line)) return { type: 'http', name, url: line, allowTools: row.allowTools };
+      const [command = '', ...args] = splitCommandLine(line);
+      return { type: 'stdio', name, command, args, allowTools: row.allowTools };
+    });
+}
+
+function McpServersField({ rows, onChange }: { rows: ServerRow[]; onChange: (rows: ServerRow[]) => void }) {
+  const nextKey = useRef(rows.length);
+  const update = (key: number, patch: Partial<ServerRow>) =>
+    onChange(rows.map((row) => (row.key === key ? { ...row, ...patch } : row)));
+  return (
+    <fieldset className="mcp-servers">
+      <legend>MCP servers for sub-agents</legend>
+      <p className="muted">
+        Sub-agents already have the MCP servers of your Claude Code or Codex setup. Add more for this project only, for example a
+        browser to test with: <code>npx @playwright/mcp@latest</code>
+      </p>
+      {rows.map((row) => (
+        <div className="mcp-row" key={row.key} data-testid="mcp-server">
+          <input
+            name="mcpName"
+            aria-label="MCP server name"
+            placeholder="playwright"
+            maxLength={40}
+            value={row.name}
+            onChange={(event) => update(row.key, { name: event.target.value })}
+          />
+          <input
+            name="mcpCommand"
+            aria-label="Command or address"
+            placeholder="npx @playwright/mcp@latest, or https://…"
+            value={row.line}
+            onChange={(event) => update(row.key, { line: event.target.value })}
+          />
+          <button type="button" className="link" onClick={() => onChange(rows.filter((item) => item.key !== row.key))}>
+            Remove
+          </button>
+          <label className="check">
+            <input
+              type="checkbox"
+              name="mcpAllowTools"
+              checked={row.allowTools}
+              onChange={(event) => update(row.key, { allowTools: event.target.checked })}
+            />{' '}
+            Run its tools without asking (otherwise each call asks you first; sub-agents in plan mode always ask)
+          </label>
+        </div>
+      ))}
+      <div>
+        <button
+          type="button"
+          onClick={() => onChange([...rows, { key: nextKey.current++, name: '', line: '', allowTools: false }])}
+        >
+          + Add MCP server
+        </button>
+      </div>
+      <small>
+        No keys or tokens here: a server that needs one reads it from the environment code-bot runs in. Changes apply from each
+        sub-agent's next turn.
+      </small>
+    </fieldset>
+  );
 }
 
 function ModelFields({
@@ -98,6 +188,7 @@ export function BotEditor({ editor }: { editor: Editor }) {
   const [form, setForm] = useState<BotInput>(() => (existing ? fromBot(existing) : blank(engines[0] ?? 'claude')));
   const [folderPath, setFolderPath] = useState('');
   const [filesText, setFilesText] = useState(() => form.subagents.worktreeFiles.join('\n'));
+  const [servers, setServers] = useState<ServerRow[]>(() => toRows(form.subagents.mcpServers));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -139,7 +230,8 @@ export function BotEditor({ editor }: { editor: Editor }) {
     setFolderPath('');
   };
 
-  const withFiles = (input: BotInput): BotInput => ({
+  /** The form with the fields edited as text (worktree files, MCP servers) turned into lists. */
+  const withLists = (input: BotInput): BotInput => ({
     ...input,
     subagents: {
       ...input.subagents,
@@ -147,6 +239,7 @@ export function BotEditor({ editor }: { editor: Editor }) {
         .split(/\r?\n/)
         .map((line) => line.trim())
         .filter(Boolean),
+      mcpServers: fromRows(servers),
     },
   });
 
@@ -155,14 +248,14 @@ export function BotEditor({ editor }: { editor: Editor }) {
     setError(null);
     try {
       if (!existing) {
-        const bot = await app.createBot(withFiles(form));
+        const bot = await app.createBot(withLists(form));
         app.openEditor(null);
         app.select(bot.id);
       } else if (isMain) {
         await app.updateBot(existing.id, { model: form.model, effort: form.effort, instructions: form.instructions });
         app.openEditor(null);
       } else {
-        await app.updateBot(existing.id, withFiles(form));
+        await app.updateBot(existing.id, withLists(form));
         app.openEditor(null);
       }
     } catch (failure) {
@@ -376,6 +469,8 @@ export function BotEditor({ editor }: { editor: Editor }) {
             <small>Limits stop a sub-agent that runs too long; a message lets it continue. The budget uses the agent's own cost estimate.</small>
           </fieldset>
         )}
+
+        {!isMain && <McpServersField rows={servers} onChange={setServers} />}
 
         <label>
           Standing instructions <span className="muted">(optional)</span>

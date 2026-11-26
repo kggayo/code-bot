@@ -152,7 +152,8 @@ export class MockEngine implements Engine {
         }
 
         const where = options.additionalDirectories?.length ? ` +${options.additionalDirectories.length} folder(s)` : '';
-        const reply = `echo[${options.model ?? 'default'}/${options.effort ?? 'default'}${where}]: ${prompt}`;
+        const mcp = options.mcpServers?.length ? ` mcp:${options.mcpServers.map((server) => server.name).join(',')}` : '';
+        const reply = `echo[${options.model ?? 'default'}/${options.effort ?? 'default'}${where}${mcp}]: ${prompt}`;
         yield { type: 'text_delta', text: reply.slice(0, 8) };
         yield { type: 'text_delta', text: reply.slice(8) };
         yield { type: 'text', text: reply };

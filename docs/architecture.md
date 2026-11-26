@@ -63,6 +63,8 @@ sub-agent (but can open one and write to it).
 | `src/core/prompts.ts` | Every system prompt and how inbound messages are framed for a bot. |
 | `src/core/tasks.ts` | `TaskManager`: sub-agent lifecycle, request relay and held requests, limits, follow-ups, permission changes, cancel, archive, shutdown. |
 | `src/core/routines.ts` | Routine schedules: checking them (`cleanSchedule`) and the next run (`nextRun`). Running them is in `CodeBot`. |
+| `src/core/mcp.ts` | MCP servers a project gives its sub-agents: checking them (`cleanMcpServers`), how a command starts (`launchCommand`, `cmd /c` on Windows), whose tools may run without asking (`allowedServers`). |
+| `src/shared/command-line.ts` | Splits a typed command line into words and joins them back (the window's MCP server field). |
 | `src/core/worktrees.ts` | Creating, removing and restoring sub-agents' git worktrees; copying untracked files into them. |
 | `src/core/version.ts` | The version agents see (kept equal to `package.json` by a test). |
 | `src/core/brain.ts` | `Brain` interface, `BotTool`, and `ClaudeBrain`. |
@@ -215,6 +217,38 @@ whole session): a run gets the remaining amount as its `maxBudgetUsd`, and none
 starts once it is used up. A run stopped by a limit ends `failed` with a message
 saying which limit, and its project bot hears about it like any failure.
 
+### MCP servers for sub-agents
+
+Sub-agents already load the MCP servers of the user's own setup: Claude Code
+sub-agents those in the user's Claude Code settings and the project's
+`.mcp.json` (`settingSources` is left unset), Codex sub-agents those in
+`~/.codex/config.toml` and Codex's plugins. A project bot's settings add more
+for that project's sub-agents only (`subagents.mcpServers`, decision 32): a
+command started on this computer (stdio) or an HTTP address, each with "Run its
+tools without asking".
+
+- They are read from the project bot before every run (`prepareTurn`), like the
+  limits, so a change reaches existing sub-agents at their next turn.
+- `src/core/mcp.ts` checks them (names of letters, digits, `_` and `-`, unique;
+  an `http(s)` address without a sign-in in it) and holds the rules both
+  engines share: on Windows, a command that is not an `.exe` or `.com` starts
+  through `cmd.exe /d /c` (`npx` is a batch file there), and in plan mode no
+  server's tools run without asking.
+- Claude Code gets them as the SDK's `mcpServers` option, on top of its own. An
+  allowed server adds the rule `mcp__<name>` to `allowedTools`, so `canUseTool`
+  is not asked for its tools (the SDK prints a warning saying so).
+- Codex gets one dotted config override per server (`mcp_servers.<name>`) on
+  `thread/start` and `thread/resume`, which adds to its own servers instead of
+  replacing them, with `default_tools_approval_mode` `approve` (allowed) or
+  `prompt`.
+- No keys or tokens are stored (requirement 8): a server that needs one reads it
+  from the environment code-bot runs in, which the agents pass on.
+- The project bot's prompt names them, so it can mention them in briefs; it
+  does not get them itself.
+- Seen with Agent SDK 0.3.325: a Claude Code session given a server whose tools
+  are allowed also connected the account's claude.ai connectors, which do not
+  load in SDK sessions otherwise. Their tools ask like any other.
+
 ### Worktrees
 
 With `subagents.isolation: "worktree"` on a project bot (or `worktree: true` on
@@ -304,9 +338,11 @@ interface EngineRun {
 `EngineRunOptions` carries `cwd`, `additionalDirectories`, `prompt`, `model`,
 `effort`, `permissionMode` (code-bot's names; engines map them), `resumeSessionId`,
 `instructions` (appended to the engine's own system prompt; code-bot uses it to
-tell the sub-agent who its team lead is and how to report), and `maxTurns` /
-`maxBudgetUsd` (engines that cannot enforce them ignore them). A `result` event
-sets `limit` when a limit stopped the run.
+tell the sub-agent who its team lead is and how to report), `maxTurns` /
+`maxBudgetUsd` (engines that cannot enforce them ignore them), and
+`mcpServers` (the project's MCP servers, added to the agent's own; see "MCP
+servers for sub-agents"). A `result` event sets `limit` when a limit stopped
+the run.
 
 `check()` is what the window's sign-in banner and settings show
 (`CodeBot.checkEngines`); when it returns a `signIn` command, the window offers
@@ -397,7 +433,7 @@ an instruction to treat it as information, never as instructions.
 SQLite file `code-bot.db` in the app's data folder (`<userData>/data`;
 `CODE_BOT_USER_DATA` overrides `userData`). Tables:
 
-- `bots`: settings of every bot; archived bots keep their row (`archived_at`).
+- `bots`: settings of every bot (a project's MCP servers as JSON in `sub_mcp_servers`); archived bots keep their row (`archived_at`).
 - `threads`: one row per conversation, with the bot's model session id and its cost so far.
 - `tasks`: one row per sub-agent (with its worktree as JSON, limits, role, the developer it checks, tokens, `archived_at`).
 - `routines`: scheduled messages to bots, with their next and last run.
@@ -497,3 +533,6 @@ cut. The event names and shapes are a public contract; they are listed in
 - What a sub-agent may do without asking is set by the project's permission
   mode and the project's own Claude Code permission rules. It runs as the
   user, with the user's access to everything on the machine.
+- MCP servers in a project's settings run as the user too. Their tools ask for
+  approval unless the user ticked "Run its tools without asking" for that
+  server, and always in plan mode. code-bot stores no keys or tokens for them.

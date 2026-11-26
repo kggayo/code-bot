@@ -46,6 +46,10 @@ and a banner with a Sign in button when a coding agent is not signed in. And:
   Windows copy one click downloads and starts the installer.
 - **Resizable panes**: drag the edges between the bot list, the conversation
   and the side panel.
+- **MCP servers per project**: sub-agents already use the MCP servers of your
+  Claude Code or Codex setup; a project's settings can add more for its
+  sub-agents only (a command such as `npx @playwright/mcp@latest`, or an
+  address), each asking before every tool call or, if you tick it, not.
 
 ## Install
 

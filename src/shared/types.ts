@@ -41,6 +41,33 @@ export const DEFAULT_WORKTREE_FILES: readonly string[] = ['.env', '.env.*'];
 export const SUBAGENT_ROLES = ['developer', 'qa', 'reviewer', 'other'] as const;
 export type SubagentRole = (typeof SUBAGENT_ROLES)[number];
 
+/**
+ * An MCP server that code-bot gives a project's sub-agents, on top of the ones they already
+ * load from the user's own Claude Code or Codex setup. code-bot stores no keys or tokens for it:
+ * a server that needs one reads it from the environment code-bot runs in.
+ */
+export type McpServer = McpStdioServer | McpHttpServer;
+
+interface McpServerBase {
+  /** What the agents call it; its tools are named mcp__<name>__<tool>. Letters, digits, "_" and "-". */
+  name: string;
+  /** Its tools run without asking (except for sub-agents in plan mode). Otherwise each call is an approval. */
+  allowTools: boolean;
+}
+
+/** A program the agent starts on this computer and talks to over stdin and stdout. */
+export interface McpStdioServer extends McpServerBase {
+  type: 'stdio';
+  command: string;
+  args: string[];
+}
+
+/** A server reached over HTTP (streamable HTTP). */
+export interface McpHttpServer extends McpServerBase {
+  type: 'http';
+  url: string;
+}
+
 /** Defaults for the sub-agents a project bot starts. */
 export interface SubagentDefaults {
   engine: string;
@@ -59,6 +86,8 @@ export interface SubagentDefaults {
   maxTurns: number | null;
   /** Stop a sub-agent once its estimated cost passes this many US dollars. null: no limit. */
   maxBudgetUsd: number | null;
+  /** MCP servers for every sub-agent of the project, read again at each of their turns. */
+  mcpServers: McpServer[];
 }
 
 export interface Bot {

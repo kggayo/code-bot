@@ -40,6 +40,7 @@ import type { Engine, EngineCheck, EngineUsageReport, TerminalCommand } from './
 import * as prompts from './prompts.ts';
 import { cleanSchedule, nextRun } from './routines.ts';
 import { BotRuntime } from './runtime.ts';
+import { cleanMcpServers } from './mcp.ts';
 import type { BrainOptions, Inbound, PreparedTurn, RuntimeHost, TurnOutcome } from './runtime.ts';
 import type { Store } from './store.ts';
 import { TaskManager } from './tasks.ts';
@@ -128,6 +129,7 @@ function defaultSubagents(engine: string): SubagentDefaults {
     worktreeFiles: [...DEFAULT_WORKTREE_FILES],
     maxTurns: null,
     maxBudgetUsd: null,
+    mcpServers: [],
   };
 }
 
@@ -1066,7 +1068,10 @@ export class CodeBot {
     return this.tasks.setPermissionMode(taskId, mode);
   }
 
-  /** Right before a sub-agent's turn: bring back its worktree if it was removed, and apply the project's current limits. */
+  /**
+   * Right before a sub-agent's turn: bring back its worktree if it was removed, and apply the
+   * project's current limits and MCP servers.
+   */
   private prepareTurn(task: Task): TurnSetup {
     let current = task;
     if (task.worktree && (task.worktree.removed || !existsSync(task.worktree.path))) {
@@ -1078,7 +1083,7 @@ export class CodeBot {
     if (maxTurns !== current.maxTurns || maxBudgetUsd !== current.maxBudgetUsd) {
       current = this.store.updateTask(task.id, { maxTurns, maxBudgetUsd }, false);
     }
-    return { task: current, maxTurns, maxBudgetUsd };
+    return { task: current, maxTurns, maxBudgetUsd, mcpServers: bot ? bot.subagents.mcpServers : [] };
   }
 
   /** Worktrees of this project's sub-agents that are on disk, newest first. */
@@ -1237,6 +1242,7 @@ export class CodeBot {
           subagents.worktreeFiles === undefined ? [...DEFAULT_WORKTREE_FILES] : cleanWorktreeFiles(subagents.worktreeFiles),
         maxTurns,
         maxBudgetUsd,
+        mcpServers: cleanMcpServers(subagents.mcpServers),
       },
     };
   }

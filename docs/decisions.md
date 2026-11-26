@@ -496,3 +496,45 @@ release page instead.
 `latest.yml` published with each release and works best with signed
 installers. The installer is started visibly (not `/S`), so the user sees
 where it installs and can cancel.
+
+## 32. MCP servers per project, added at every run (2026-11-26)
+
+**Decided:** a project bot's settings list MCP servers for its sub-agents
+(`subagents.mcpServers`): a command (stdio) or an HTTP address, and whether
+the server's tools run without asking. code-bot passes them with every run, on
+top of what the agent loads from the user's own setup: Claude Code through the
+Agent SDK's `mcpServers` (allowed servers as `allowedTools` rules
+`mcp__<name>`), Codex through dotted config overrides `mcp_servers.<name>` on
+`thread/start` and `thread/resume` (allowed servers with
+`default_tools_approval_mode = "approve"`, others `"prompt"`). Nothing is
+written to the user's Claude Code or Codex configuration, and other projects
+and the user's own sessions do not see them.
+
+Checked against the real agents (Codex 0.160.1, Agent SDK 0.3.325) with a
+small local MCP server: the dotted override adds the server next to Codex's
+own (its `config.toml` servers, plugins and ChatGPT apps stay); an allowed
+server's tool ran without `canUseTool` being asked; a server not allowed asked
+first.
+
+- **No keys or tokens** (requirement 8): there are no fields for environment
+  variables or headers. A server that needs a key reads it from the
+  environment code-bot runs in, which the agents pass on.
+- **Windows:** `npx` and similar commands are batch files that an agent cannot
+  start directly, so everything but an `.exe` or `.com` starts through
+  `cmd.exe /d /c`, as Claude Code's own documentation advises.
+- **Plan mode** never runs a server's tools without asking: plan mode promises
+  a read-only run, and an MCP tool can change things.
+- **Bots do not get them.** Bots only have their routing and read-only tools;
+  the project bot's prompt names the servers so it can use them in briefs.
+
+**Rejected:** running `claude mcp add` and `codex mcp add` for the user (a
+sub-agent can still do that on request, with an approval): it changes the
+user's global setup for every session on the machine, and code-bot could not
+show or undo it. Fields for environment variables or headers: code-bot would
+keep secrets.
+
+**Not possible yet:** handing sub-agents the user's claude.ai connectors (the
+ones the Claude desktop app shows). They do not load in SDK sessions, also not
+with `ENABLE_CLAUDEAI_MCP_SERVERS=true`, except, as observed, when the session
+also has a server whose tools are allowed. That is undocumented, so code-bot
+does not rely on it either way.

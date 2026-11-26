@@ -30,7 +30,12 @@ are `CodeBotError` with a `code`: `invalid`, `not_found`, `conflict` or `busy`.
     "isolation": "worktree",       // "shared" (the project folders) or "worktree" (own git worktree and branch)
     "worktreeFiles": [".env", ".env.*"], // untracked files copied into each new worktree
     "maxTurns": 50,                // per run; null = no limit
-    "maxBudgetUsd": 5              // per sub-agent, the engine's estimate; null = no limit
+    "maxBudgetUsd": 5,             // per sub-agent, the engine's estimate; null = no limit
+    "mcpServers": [                // McpServer[]: added to the agents' own MCP servers, read at every turn (max 20)
+      { "type": "stdio", "name": "playwright", "command": "npx", "args": ["@playwright/mcp@latest"], "allowTools": true },
+      { "type": "http", "name": "docs", "url": "https://docs.example.com/mcp", "allowTools": false }
+    ]                              // name: letters, digits, "_", "-" (tools are mcp__<name>__<tool>); allowTools: run its
+                                   // tools without asking (never in plan mode); no keys or tokens are stored
   },
   "threadId": "c_9f…",             // current conversation
   "createdAt": "…", "updatedAt": "…",

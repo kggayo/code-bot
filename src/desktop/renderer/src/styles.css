@@ -801,6 +801,10 @@ body.resizing {
 .dialog h2 {
   font-size: 17px;
 }
+/* Fieldsets are as wide as their widest content by default; a long folder path would push the dialog sideways. */
+.dialog fieldset {
+  min-width: 0;
+}
 .dialog label {
   display: grid;
   gap: 4px;
@@ -840,6 +844,8 @@ body.resizing {
   margin: 0;
   padding: 0;
   display: grid;
+  /* A column that can shrink, so a long path is cut short with "…" instead of widening the dialog. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 4px;
 }
 .folders li {
@@ -861,6 +867,28 @@ body.resizing {
 .folder-add {
   display: flex;
   gap: 6px;
+}
+/* One MCP server: name, command or address and Remove on a line, "without asking" below them. */
+.mcp-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 3fr) auto;
+  align-items: center;
+  gap: 4px 6px;
+}
+.mcp-row input {
+  min-width: 0;
+}
+.mcp-row input[name='mcpCommand'] {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+}
+.dialog .mcp-row label.check {
+  grid-column: 1 / -1;
+  white-space: normal;
+}
+.mcp-servers p {
+  margin: 0;
+  font-size: 12.5px;
 }
 .folder-add button {
   flex: none;

@@ -204,6 +204,38 @@ try {
     await panel.getByLabel('Show archived').uncheck();
   });
 
+  await check("MCP servers are set in a project's settings and reach its next sub-agent", async () => {
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    const add = dialog.getByRole('button', { name: '+ Add MCP server' });
+    await add.click();
+    const first = dialog.getByTestId('mcp-server').last();
+    await first.locator('input[name="mcpName"]').fill('playwright');
+    await first.locator('input[name="mcpCommand"]').fill('npx @playwright/mcp@latest');
+    await first.locator('input[name="mcpAllowTools"]').check();
+    // A server with a broken address is refused, with the reason.
+    await add.click();
+    const second = dialog.getByTestId('mcp-server').last();
+    await second.locator('input[name="mcpName"]').fill('docs');
+    await second.locator('input[name="mcpCommand"]').fill('https://');
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await dialog.getByRole('alert').getByText('The MCP server "docs" needs a full address', { exact: false }).waitFor();
+    await second.getByRole('button', { name: 'Remove' }).click();
+    if (shots) await page.screenshot({ path: join(shots, '3b-mcp-servers.png') });
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await dialog.waitFor({ state: 'detached' });
+
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    const kept = page.getByRole('dialog').getByTestId('mcp-server');
+    assert.equal(await kept.count(), 1);
+    assert.equal(await kept.locator('input[name="mcpCommand"]').inputValue(), 'npx @playwright/mcp@latest');
+    assert.equal(await kept.locator('input[name="mcpAllowTools"]').isChecked(), true);
+    await page.keyboard.press('Escape');
+
+    await say(page, 'task: open the browser');
+    await conversation.getByText(/finished: echo\[dev-model\/high mcp:playwright\]: open the browser/).waitFor();
+  });
+
   await check('an earlier conversation can be read and continued', async () => {
     await page.getByRole('button', { name: 'New conversation' }).click();
     await conversation.locator('.divider', { hasText: 'New conversation' }).waitFor();

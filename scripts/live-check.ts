@@ -6,11 +6,14 @@
 //
 // It works in a throwaway project folder it creates itself, and grants the
 // approvals it is asked for there. Screenshots go to CODE_BOT_SHOTS, if set.
+// A tiny local MCP server ("probe") checks that MCP servers from a project's
+// settings reach its sub-agents.
 //
 // With CODE_BOT_LIVE_CODEX=1 it also runs a project bot whose sub-agents are
 // Codex (signed in with `codex login`), on the cheapest fast model Codex
 // offers: a sub-agent creates a file after an approval, then the project bot
-// continues the same Codex session with a follow-up. That uses Codex usage.
+// continues the same Codex session with a follow-up, and a Codex sub-agent
+// calls the probe server after an approval. That uses Codex usage.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -21,7 +24,8 @@ import { _electron as electron } from 'playwright-core';
 import type { Page } from 'playwright-core';
 import { CodexEngine } from '../src/core/engines/codex.ts';
 import type { CodexModel } from '../src/core/engines/codex.ts';
-import type { DesktopBridge, TaskView } from '../src/shared/types.ts';
+import { joinCommandLine } from '../src/shared/command-line.ts';
+import type { DesktopBridge, Task, TaskView } from '../src/shared/types.ts';
 
 // The page-side callbacks below run in the window; this file is type-checked without DOM types.
 declare const document: { querySelector(selector: string): unknown; querySelectorAll(selector: string): { length: number } };
@@ -47,6 +51,30 @@ git('commit', '-q', '-m', 'first');
 const shots = process.env.CODE_BOT_SHOTS;
 if (shots) mkdirSync(shots, { recursive: true });
 const MINUTES = 60_000;
+
+// A minimal MCP server over stdio with one tool, "probe", that answers with a marker.
+const PROBE_MARKER = 'PROBE-MARKER-7431';
+const probeServer = join(userData, 'probe-mcp.mjs');
+writeFileSync(
+  probeServer,
+  `import { createInterface } from 'node:readline';
+const send = (message) => process.stdout.write(JSON.stringify(message) + '\\n');
+for await (const line of createInterface({ input: process.stdin })) {
+  if (!line.trim()) continue;
+  const { id, method, params } = JSON.parse(line);
+  if (id === undefined) continue;
+  if (method === 'initialize') {
+    send({ jsonrpc: '2.0', id, result: { protocolVersion: params?.protocolVersion ?? '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'probe', version: '1.0.0' } } });
+  } else if (method === 'tools/list') {
+    send({ jsonrpc: '2.0', id, result: { tools: [{ name: 'probe', description: 'Returns a fixed marker word.', inputSchema: { type: 'object', properties: {} } }] } });
+  } else if (method === 'tools/call') {
+    send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: '${PROBE_MARKER}' }] } });
+  } else {
+    send({ jsonrpc: '2.0', id, result: {} });
+  }
+}
+`,
+);
 
 const app = await electron.launch({
   args: [root],
@@ -109,6 +137,27 @@ function cheapestFast(models: CodexModel[]): CodexModel | undefined {
     usable.find((model) => /fast/i.test(model.description)) ??
     models.find((model) => model.isDefault)
   );
+}
+
+/** Adds the probe MCP server ("node probe-mcp.mjs") in the open project bot's settings. */
+async function addProbeServer(allowTools: boolean) {
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: '+ Add MCP server' }).click();
+  const row = dialog.getByTestId('mcp-server').last();
+  await row.locator('input[name="mcpName"]').fill('probe');
+  await row.locator('input[name="mcpCommand"]').fill(joinCommandLine([process.execPath, probeServer]));
+  if (allowTools) await row.locator('input[name="mcpAllowTools"]').check();
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await dialog.waitFor({ state: 'detached' });
+}
+
+/** The newest sub-agent of the given engine. */
+async function newestTask(engine: string): Promise<Task> {
+  const tasks = (await page.evaluate(() => window.codeBot.call('listTasks', [{}]))) as Task[];
+  const task = tasks.filter((candidate) => candidate.engine === engine).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  assert.ok(task, `no ${engine} sub-agent`);
+  return task;
 }
 
 /** Allows every approval that shows up in the open conversation until all is quiet. Returns how many. */
@@ -228,6 +277,19 @@ try {
     await page.locator('.panel').getByText(/Session started · claude-haiku/).first().waitFor();
     await page.locator('.panel .panel-head button.link').first().click();
   });
+
+  await check("an MCP server from the project's settings reaches a sub-agent, and its allowed tool runs without asking", async () => {
+    await addProbeServer(true);
+    await say('Have a sub-agent call the probe tool of its "probe" MCP server once and report exactly what the tool returned. Nothing else.');
+    const approvals = await approveUntilQuiet(page);
+    console.log(`       (${approvals} approval(s) given)`);
+    const task = await newestTask('claude');
+    assert.ok(task.lastResult?.includes(PROBE_MARKER), `the sub-agent did not get the marker: ${task.lastResult}`);
+    const view = (await page.evaluate((id) => window.codeBot.call('getTask', [id]), task.id)) as TaskView;
+    const asked = view.events.filter((event) => event.type === 'request' && JSON.stringify(event.data).includes('mcp__probe'));
+    assert.equal(asked.length, 0, 'the allowed probe tool asked for approval');
+    if (shots) await page.screenshot({ path: join(shots, 'live-4b-mcp.png') });
+  });
   if (withCodex) {
     let codexModel = '';
     await check('Codex: a project bot with Codex sub-agents is created', async () => {
@@ -299,6 +361,18 @@ try {
       assert.match(view.task.lastResult ?? '', /hello\.txt/);
       const lastReply = await conversation.locator('.msg.bot').last().innerText();
       assert.match(lastReply, /hello\.txt/);
+    });
+
+    await check("Codex: an MCP server from the project's settings reaches a sub-agent, and its tool asks first", async () => {
+      await addProbeServer(false);
+      await say('Have a new sub-agent call the probe tool of its "probe" MCP server once and report exactly what the tool returned. Nothing else.');
+      await conversation.locator('.request-card').last().waitFor({ timeout: 5 * MINUTES });
+      const approvals = await approveUntilQuiet(page);
+      console.log(`       (${approvals} approval(s) given)`);
+      assert.ok(approvals >= 1, 'the probe tool ran without asking');
+      const task = await newestTask('codex');
+      assert.ok(task.lastResult?.includes(PROBE_MARKER), `the Codex sub-agent did not get the marker: ${task.lastResult}`);
+      if (shots) await page.screenshot({ path: join(shots, 'live-6-codex-mcp.png') });
     });
 
     // Keep the owner's Codex history tidy; `codex unarchive <id>` brings the thread back.

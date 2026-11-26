@@ -6,6 +6,7 @@ import type {
   Bot,
   Effort,
   Isolation,
+  McpServer,
   PendingRequest,
   PermissionMode,
   Routine,
@@ -153,6 +154,10 @@ const MIGRATIONS: string[] = [
     updated_at TEXT NOT NULL
   );
   `,
+  // 4: MCP servers for a project's sub-agents.
+  `
+  ALTER TABLE bots ADD COLUMN sub_mcp_servers TEXT NOT NULL DEFAULT '[]';
+  `,
 ];
 
 /** The version this code writes. */
@@ -225,6 +230,7 @@ function toBot(row: Row): Bot {
       worktreeFiles: JSON.parse(String(row.sub_worktree_files ?? '[]')) as string[],
       maxTurns: (row.sub_max_turns as number | null) ?? null,
       maxBudgetUsd: (row.sub_max_budget_usd as number | null) ?? null,
+      mcpServers: JSON.parse(String(row.sub_mcp_servers ?? '[]')) as McpServer[],
     },
     threadId: row.thread_id as string,
     createdAt: row.created_at as string,
@@ -250,6 +256,7 @@ function botValues(bot: Bot): Record<string, SqlValue> {
     sub_worktree_files: JSON.stringify(bot.subagents.worktreeFiles),
     sub_max_turns: bot.subagents.maxTurns,
     sub_max_budget_usd: bot.subagents.maxBudgetUsd,
+    sub_mcp_servers: JSON.stringify(bot.subagents.mcpServers),
     thread_id: bot.threadId,
     created_at: bot.createdAt,
     updated_at: bot.updatedAt,

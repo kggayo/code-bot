@@ -11,6 +11,17 @@ import type { Updater } from './updates.ts';
 const text = z.string();
 const id = z.string().min(1).max(100);
 const after = z.number().int().min(0).optional();
+// The shape only; the core checks names, commands and addresses (src/core/mcp.ts).
+const mcpServer = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('stdio'),
+    name: z.string().max(40),
+    command: z.string().max(1000),
+    args: z.array(z.string().max(2000)).max(50),
+    allowTools: z.boolean(),
+  }),
+  z.object({ type: z.literal('http'), name: z.string().max(40), url: z.string().max(2000), allowTools: z.boolean() }),
+]);
 const subagents = z.object({
   engine: z.string().min(1),
   model: z.string().nullable(),
@@ -20,6 +31,7 @@ const subagents = z.object({
   worktreeFiles: z.array(z.string().max(200)).max(30),
   maxTurns: z.number().int().min(1).max(10_000).nullable(),
   maxBudgetUsd: z.number().positive().max(100_000).nullable(),
+  mcpServers: z.array(mcpServer).max(20),
 });
 const settings = z.object({
   maxActiveSubagents: z.number().int().min(1).max(50),

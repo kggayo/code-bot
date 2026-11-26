@@ -42,6 +42,15 @@ in the status table in `AGENTS.md`; the reasoning is in `docs/decisions.md`
 - **Updating in place on Linux.** The update button opens the release page on
   Linux (decision 31). Replacing the running AppImage (`$APPIMAGE`) with the new
   one and restarting is possible but untested.
+- **claude.ai connectors for Claude Code sub-agents.** The connectors of the
+  owner's Claude account (ClickUp, Gmail, …) do not load in Agent SDK sessions
+  (decision 32). Re-test after an SDK upgrade; if a supported switch appears, a
+  per-project "use my claude.ai connectors" setting is a small addition. Codex
+  sub-agents already get the ChatGPT apps of the owner's Codex login.
+- **Keys for MCP servers by name.** A project's MCP servers take no keys
+  (decision 32). Naming an environment variable for an HTTP server's token
+  (Codex has `bearer_token_env_var`; Claude Code would need a header built from
+  it) would let such servers work without code-bot storing the key.
 
 ## Milestone 2: the main bot on the Azure VM, reachable over an API or MCP
 

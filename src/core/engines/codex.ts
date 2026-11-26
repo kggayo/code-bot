@@ -42,6 +42,7 @@ import { accessSync, constants, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, delimiter, isAbsolute, join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { allowedServers, launchCommand } from '../mcp.ts';
 import { clip, errorMessage } from '../util.ts';
 import { CODE_BOT_VERSION } from '../version.ts';
 import type {
@@ -52,6 +53,7 @@ import type {
   EngineRun,
   EngineRunOptions,
   EngineUsageReport,
+  McpServer,
   TerminalCommand,
   UsageWindow,
   UserRequest,
@@ -158,6 +160,26 @@ function permissionsFor(
     default:
       return { approvalPolicy: 'untrusted', sandboxPolicy: workspace };
   }
+}
+
+/**
+ * The project's MCP servers as config overrides for thread/start and thread/resume. A dotted key
+ * per server ("mcp_servers.<name>") adds it to the servers Codex loads from ~/.codex/config.toml
+ * and its plugins instead of replacing them. default_tools_approval_mode "approve" runs the
+ * server's tools without asking; "prompt" asks for each call.
+ */
+export function codexMcpConfig(
+  servers: readonly McpServer[] | undefined,
+  permissionMode: string | undefined,
+  platform: NodeJS.Platform = process.platform,
+): Json {
+  const config: Json = {};
+  const allowed = new Set(allowedServers(servers ?? [], permissionMode));
+  for (const server of servers ?? []) {
+    const reach = server.type === 'http' ? { url: server.url } : launchCommand(server.command, server.args, platform);
+    config[`mcp_servers.${server.name}`] = { ...reach, default_tools_approval_mode: allowed.has(server) ? 'approve' : 'prompt' };
+  }
+  return config;
 }
 
 // ---- finding and starting the codex program ---------------------------------------------------
@@ -739,7 +761,7 @@ class CodexRun implements EngineRun {
       cwd: this.options.cwd,
       model: this.options.model || undefined,
       developerInstructions: this.options.instructions || undefined,
-      config: THREAD_CONFIG,
+      config: { ...THREAD_CONFIG, ...codexMcpConfig(this.options.mcpServers, this.options.permissionMode) },
     };
     const response = this.options.resumeSessionId
       ? await rpc.request('thread/resume', { ...settings, threadId: this.options.resumeSessionId, excludeTurns: true })

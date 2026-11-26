@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { ACTIVE_STATES, DEFAULT_SETTINGS } from '../shared/types.ts';
 import type {
   CoreEvent,
+  McpServer,
   PendingRequest,
   Requester,
   SubagentRole,
@@ -46,6 +47,8 @@ export interface TurnSetup {
   task: Task;
   maxTurns: number | null;
   maxBudgetUsd: number | null;
+  /** The project's MCP servers for this turn. */
+  mcpServers: McpServer[];
 }
 
 export interface TaskManagerOptions {
@@ -512,7 +515,7 @@ export class TaskManager {
   private startTurn(original: Task, prompt: string, grants: string[] = []): void {
     const setup: TurnSetup = this.prepareTurn
       ? this.prepareTurn(original)
-      : { task: original, maxTurns: original.maxTurns, maxBudgetUsd: original.maxBudgetUsd };
+      : { task: original, maxTurns: original.maxTurns, maxBudgetUsd: original.maxBudgetUsd, mcpServers: [] };
     const task = setup.task;
     const engine = this.engines.get(task.engine);
     if (!engine) throw new CodeBotError('invalid', `Engine "${task.engine}" is not available`);
@@ -588,6 +591,7 @@ export class TaskManager {
         instructions: task.instructions || undefined,
         maxTurns: setup.maxTurns ?? undefined,
         maxBudgetUsd,
+        mcpServers: setup.mcpServers.length ? setup.mcpServers : undefined,
       },
       askUser,
     );
