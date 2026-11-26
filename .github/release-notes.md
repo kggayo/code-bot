@@ -1,5 +1,16 @@
 code-bot is a desktop app that orchestrates coding agents on your own computer. You talk to a main bot, or to a project bot. Each project bot runs sub-agents (Claude Code or Codex) in your project folders, and reports back with their results, questions and approval requests.
 
+## What is new in 0.4.0
+
+- **One developer per piece of work.** A ticket stays with the same sub-agent from investigation to fix, so it keeps its context and its branch. QA and code reviewers are separate sub-agents, and their findings go back to that developer.
+- **Plan limits and costs.** See how much of your Claude Code (and Codex) 5-hour and weekly limits is used and when they reset, and what each bot and sub-agent used.
+- **Routines.** Send a bot a message on a schedule: on chosen days at a time, every few hours, or once. The next ones are listed in the sidebar.
+- **Who is working.** Spinners on busy bots and running sub-agents, a strip above the message box, and the main bot's side panel shows the project bots at work.
+- **Readable approvals.** Plans, commands, file edits and patches are shown as such instead of JSON, and answered questions keep their answer.
+- **Taskbar badge.** The icon shows how many questions and approvals wait, and flashes when one arrives.
+- **Update button.** code-bot tells you when a new version is out; an installed Windows copy downloads and starts the installer for you (from this version on).
+- **Resizable panes** and a **sharper icon** on the taskbar.
+
 ## Download
 
 | Your computer | File | How |
