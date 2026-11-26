@@ -1,5 +1,5 @@
 /** code-bot's version, as agents see it. Keep in step with package.json (a test checks). */
-export const CODE_BOT_VERSION = '0.4.0';
+export const CODE_BOT_VERSION = '0.5.0';
 
 /** How code-bot introduces itself to Claude Code. */
 export const CLIENT_APP = `code-bot/${CODE_BOT_VERSION}`;

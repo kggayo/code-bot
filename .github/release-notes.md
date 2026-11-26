@@ -1,15 +1,12 @@
 code-bot is a desktop app that orchestrates coding agents on your own computer. You talk to a main bot, or to a project bot. Each project bot runs sub-agents (Claude Code or Codex) in your project folders, and reports back with their results, questions and approval requests.
 
-## What is new in 0.4.0
+## What is new in 0.5.0
 
-- **One developer per piece of work.** A ticket stays with the same sub-agent from investigation to fix, so it keeps its context and its branch. QA and code reviewers are separate sub-agents, and their findings go back to that developer.
-- **Plan limits and costs.** See how much of your Claude Code (and Codex) 5-hour and weekly limits is used and when they reset, and what each bot and sub-agent used.
-- **Routines.** Send a bot a message on a schedule: on chosen days at a time, every few hours, or once. The next ones are listed in the sidebar.
-- **Who is working.** Spinners on busy bots and running sub-agents, a strip above the message box, and the main bot's side panel shows the project bots at work.
-- **Readable approvals.** Plans, commands, file edits and patches are shown as such instead of JSON, and answered questions keep their answer.
-- **Taskbar badge.** The icon shows how many questions and approvals wait, and flashes when one arrives.
-- **Update button.** code-bot tells you when a new version is out; an installed Windows copy downloads and starts the installer for you (from this version on).
-- **Resizable panes** and a **sharper icon** on the taskbar.
+- **MCP servers per project.** Give a project's sub-agents extra MCP servers in its settings, such as a browser to test with (`npx @playwright/mcp@latest`), on top of the ones in your Claude Code or Codex setup. Each tool call asks you first unless you tick "Run its tools without asking". A server reached by address can take its token from an environment variable you name: code-bot stores no tokens.
+- **Merge or push a sub-agent's branch.** When sub-agents work in their own git worktrees, a finished one's panel lets you merge its branch into your project folder, or push it and open a pull request (with GitHub's `gh`, or GitHub's own page without it).
+- **Routines from a conversation.** Ask a bot "every weekday at 9, …" and it proposes the routine on a card; it exists once you click Create.
+- **The AppImage updates itself.** On Linux the update button downloads the new AppImage, checks it, puts it in place and restarts (from this version on). The `.deb` still opens the release page.
+- **A tidier window in small sizes.** The conversation keeps its title and its room when the window is narrow, and the settings dialog no longer scrolls sideways.
 
 ## Download
 
