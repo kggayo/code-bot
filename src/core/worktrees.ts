@@ -12,7 +12,9 @@ import { CodeBotError } from './util.ts';
  * run by code-bot itself, never on a bot's say-so.
  */
 
-const GIT_OPTIONS = ['-c', 'core.fsmonitor=false', '-c', 'color.ui=never', '--no-pager'];
+// --no-optional-locks: a status check for the window must not take the index lock, or a commit
+// running in the same worktree at that moment fails ("index.lock: File exists").
+const GIT_OPTIONS = ['-c', 'core.fsmonitor=false', '-c', 'color.ui=never', '--no-pager', '--no-optional-locks'];
 const GIT_TIMEOUT_MS = 120_000;
 
 /** Runs git in a folder; a failure becomes a CodeBotError with git's last lines. Also used by branches.ts. */

@@ -322,7 +322,9 @@ file). A failed run leaves no release: fix, move the tag
   `test/helpers.ts` so the machine's gh never runs; git repositories in tests
   set `core.autocrlf false` so files read back as written on Windows. Git work
   in one worktree runs one piece at a time (`CodeBot.oneAtATime`): Windows
-  cannot remove a folder while the window's git status runs in it.
+  cannot remove a folder while the window's git status runs in it. Every git
+  command code-bot or a bot runs uses `--no-optional-locks`, so a status check
+  never holds the index lock while a sub-agent (or a test) commits.
 - **Dialog fieldsets need `min-width: 0`** (already in `styles.css`): by
   default a fieldset is as wide as its widest content, and a long folder path
   pushed the settings dialog sideways.

@@ -26,7 +26,8 @@ export function runGit(cwd: string, args: string[], signal?: AbortSignal): Promi
     if (other) return Promise.reject(new Error(`git branch may only list branches; "${other}" is not allowed`));
   }
   const safety = subcommand === 'diff' || subcommand === 'log' || subcommand === 'show' ? ['--no-ext-diff', '--no-textconv'] : [];
-  const fullArgs = ['-c', 'core.fsmonitor=false', '-c', 'color.ui=never', '--no-pager', subcommand, ...safety, ...rest];
+  // --no-optional-locks: reading must never take the index lock a sub-agent's commit needs at the same moment.
+  const fullArgs = ['-c', 'core.fsmonitor=false', '-c', 'color.ui=never', '--no-pager', '--no-optional-locks', subcommand, ...safety, ...rest];
 
   return new Promise((resolve, reject) => {
     execFile(
