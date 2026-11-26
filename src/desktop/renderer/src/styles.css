@@ -349,20 +349,26 @@ body.resizing {
   min-height: 0;
   background: var(--bg);
 }
+/* When the conversation is narrow the buttons wrap below the title instead of squeezing it away. */
 .conv-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px 12px;
   padding: 12px 18px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
 .conv-title {
+  flex: 1 1 160px;
   min-width: 0;
 }
 .conv-title h1 {
   font-size: 17px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .conv-title p {
   margin: 0;
@@ -374,8 +380,10 @@ body.resizing {
 }
 .conv-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
-  flex: none;
+  margin-left: auto;
 }
 .log {
   flex: 1;

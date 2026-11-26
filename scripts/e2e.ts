@@ -31,6 +31,10 @@ const app = await electron.launch({
   env: { ...process.env, CODE_BOT_FAKE_MODELS: '1', CODE_BOT_USER_DATA: userData, CODE_BOT_NO_QUIT_PROMPT: '1' },
 });
 const page = await app.firstWindow();
+// The size of the screen on GitHub's runners, so the layout is checked the same way everywhere.
+const setWindowSize = (width: number, height: number) =>
+  app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0]?.setSize(w, h), [width, height] as const);
+await setWindowSize(1024, 768);
 const errors: string[] = [];
 page.on('pageerror', (error) => errors.push(error.message));
 page.on('console', (message) => {
@@ -246,9 +250,16 @@ try {
     await conversation.getByText(/echo: \[routine "Morning check"/).waitFor();
   });
 
-  await check('the panes can be resized, and the plan limits are shown', async () => {
+  await check('the panes can be resized, give way in a narrow window, and the plan limits are shown', async () => {
     const sidebar = page.locator('.sidebar');
-    const before = (await sidebar.boundingBox())?.width ?? 0;
+    const center = page.locator('.conversation');
+    const widthOf = async (locator: typeof sidebar) => (await locator.boundingBox())?.width ?? 0;
+    // The keyboard narrows the side panel, which leaves the bot list room to grow.
+    await page.getByRole('separator', { name: 'Resize the side panel' }).focus();
+    const panelBefore = await widthOf(panel);
+    for (let i = 0; i < 6; i += 1) await page.keyboard.press('ArrowRight');
+    assert.ok((await widthOf(panel)) < panelBefore - 60, `the side panel shrank from ${panelBefore}`);
+    const before = await widthOf(sidebar);
     const handle = page.getByRole('separator', { name: 'Resize the bot list' });
     const box = await handle.boundingBox();
     assert.ok(box);
@@ -256,12 +267,21 @@ try {
     await page.mouse.down();
     await page.mouse.move(box.x + 80, box.y + 200, { steps: 5 });
     await page.mouse.up();
-    const after = (await sidebar.boundingBox())?.width ?? 0;
+    const after = await widthOf(sidebar);
     assert.ok(after > before + 60, `the sidebar grew from ${before} to ${after}`);
-    await page.getByRole('separator', { name: 'Resize the side panel' }).focus();
-    const panelBefore = (await panel.boundingBox())?.width ?? 0;
-    await page.keyboard.press('ArrowLeft');
-    assert.ok(((await panel.boundingBox())?.width ?? 0) > panelBefore);
+    // In the smallest window the panes give way: the conversation keeps its room and its title.
+    await setWindowSize(960, 600);
+    // (Strings, because these run in the page and the scripts are not typed for the DOM.)
+    await page.waitForFunction('window.innerWidth < 990');
+    await page.waitForFunction("document.querySelector('.conversation').getBoundingClientRect().width >= 378");
+    assert.ok((await widthOf(sidebar)) < after, 'the sidebar gave way');
+    assert.ok((await widthOf(page.locator('.conv-title h1'))) > 40, 'the title stays visible');
+    await page.locator('.conv-title h1').waitFor({ state: 'visible' });
+    if (shots) await page.screenshot({ path: join(shots, '4b-narrow-window.png') });
+    // Wide again, the chosen widths come back.
+    await setWindowSize(1024, 768);
+    await page.waitForFunction(`Math.abs(document.querySelector('.sidebar').getBoundingClientRect().width - ${after}) < 2`);
+    assert.ok((await widthOf(center)) >= 378);
     await page.getByTestId('usage-meter').getByText('5-hour session').waitFor();
   });
 

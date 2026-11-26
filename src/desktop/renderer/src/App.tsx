@@ -27,6 +27,19 @@ function stored(pane: Pane): number {
   }
 }
 
+/**
+ * The widths to show in a window this wide: when the chosen widths leave the conversation less than
+ * CENTER_MIN, the side panel gives way first, then the bot list, each down to its smallest. The chosen
+ * widths are kept, so they come back when the window is wide again.
+ */
+function fit(left: number, right: number, width: number): { left: number; right: number } {
+  let short = left + right + CENTER_MIN - width;
+  if (short <= 0) return { left, right };
+  const fromRight = Math.min(short, right - PANES.right[0]);
+  short -= fromRight;
+  return { left: left - Math.min(short, left - PANES.left[0]), right: right - fromRight };
+}
+
 function remember(pane: Pane, value: number): void {
   try {
     localStorage.setItem(`code-bot.pane.${pane}`, String(Math.round(value)));
@@ -39,15 +52,22 @@ export function App() {
   const app = useAppState();
   const [left, setLeft] = useState(() => stored('left'));
   const [right, setRight] = useState(() => stored('right'));
+  const [width, setWidth] = useState(() => window.innerWidth);
   useEffect(() => {
     void app.init();
   }, [app]);
+  useEffect(() => {
+    const changed = () => setWidth(window.innerWidth);
+    window.addEventListener('resize', changed);
+    return () => window.removeEventListener('resize', changed);
+  }, []);
 
   /** Keeps the pane within its limits and leaves the conversation its room. */
   const resize = useCallback(
     (pane: Pane, wanted: number) => {
       const [min, max] = PANES[pane];
-      const other = pane === 'left' ? right : left;
+      const shown = fit(left, right, window.innerWidth);
+      const other = pane === 'left' ? shown.right : shown.left;
       const room = window.innerWidth - other - CENTER_MIN;
       const value = Math.round(Math.max(min, Math.min(max, room, wanted)));
       (pane === 'left' ? setLeft : setRight)(value);
@@ -67,14 +87,15 @@ export function App() {
   if (!app.ready) return <div className="starting">Starting code-bot…</div>;
 
   const bot = app.bot(app.selectedBotId) ?? app.bots[0];
+  const shown = fit(left, right, width);
   return (
     <div className="shell">
       <EngineBanner />
-      <div className="app" style={{ '--left': `${left}px`, '--right': `${right}px` } as CSSProperties}>
+      <div className="app" style={{ '--left': `${shown.left}px`, '--right': `${shown.right}px` } as CSSProperties}>
         <Sidebar />
         <Resizer
           label="Resize the bot list"
-          value={left}
+          value={shown.left}
           grows="right"
           onChange={(value) => resize('left', value)}
           onReset={() => resize('left', PANES.left[2])}
@@ -82,7 +103,7 @@ export function App() {
         {bot ? <Conversation key={bot.id} bot={bot} /> : <section className="conversation" />}
         <Resizer
           label="Resize the side panel"
-          value={right}
+          value={shown.right}
           grows="left"
           onChange={(value) => resize('right', value)}
           onReset={() => resize('right', PANES.right[2])}

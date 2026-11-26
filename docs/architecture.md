@@ -448,7 +448,10 @@ cut. The event names and shapes are a public contract; they are listed in
   the default browser, and sub-agent ids (`t_…`) turned into buttons.
 - The three panes are resizable: drag the handles between them (or focus one
   and use the arrow keys; double-click resets). Widths are kept in the
-  window's `localStorage`; the conversation keeps at least 380 px.
+  window's `localStorage`; the conversation keeps at least 380 px. In a
+  narrower window the side panel, then the bot list, give way (down to their
+  smallest widths) and get their chosen widths back when it widens again; the
+  conversation's buttons wrap below its title instead of hiding it.
 - Who is working: a spinning ring and a working badge on bots in the sidebar,
   a strip above the message box (in the main bot's conversation the project
   bots at work, in a project bot's its working sub-agents), a "thinking"
