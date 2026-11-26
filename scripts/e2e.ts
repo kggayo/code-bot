@@ -54,6 +54,15 @@ async function check(name: string, run: () => Promise<void>) {
   }
 }
 
+/** Waits until `condition` holds, asking it again every 50 ms for up to 10 seconds. */
+async function until(what: string, condition: () => Promise<boolean>) {
+  const end = Date.now() + 10_000;
+  while (!(await condition())) {
+    if (Date.now() > end) throw new Error(`timed out waiting until ${what}`);
+    await new Promise((done) => setTimeout(done, 50));
+  }
+}
+
 async function say(target: Page, text: string) {
   const box = target.locator('[data-testid="composer"] textarea');
   await box.fill(text);
@@ -270,17 +279,17 @@ try {
     const after = await widthOf(sidebar);
     assert.ok(after > before + 60, `the sidebar grew from ${before} to ${after}`);
     // In the smallest window the panes give way: the conversation keeps its room and its title.
+    // (Measured from here: the page's Content-Security-Policy refuses waitForFunction's string form.)
     await setWindowSize(960, 600);
-    // (Strings, because these run in the page and the scripts are not typed for the DOM.)
-    await page.waitForFunction('window.innerWidth < 990');
-    await page.waitForFunction("document.querySelector('.conversation').getBoundingClientRect().width >= 378");
+    await until('the window is narrow', async () => (await widthOf(page.locator('.shell'))) < 990);
+    await until('the conversation keeps its room', async () => (await widthOf(center)) >= 378);
     assert.ok((await widthOf(sidebar)) < after, 'the sidebar gave way');
     assert.ok((await widthOf(page.locator('.conv-title h1'))) > 40, 'the title stays visible');
     await page.locator('.conv-title h1').waitFor({ state: 'visible' });
     if (shots) await page.screenshot({ path: join(shots, '4b-narrow-window.png') });
     // Wide again, the chosen widths come back.
     await setWindowSize(1024, 768);
-    await page.waitForFunction(`Math.abs(document.querySelector('.sidebar').getBoundingClientRect().width - ${after}) < 2`);
+    await until('the sidebar has its chosen width again', async () => Math.abs((await widthOf(sidebar)) - after) < 2);
     assert.ok((await widthOf(center)) >= 378);
     await page.getByTestId('usage-meter').getByText('5-hour session').waitFor();
   });
