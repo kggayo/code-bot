@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- icon.svg for 16-32 px: the same lead and team, drawn on a 32-pixel grid without the margin and with bolder shapes, so edges land on whole pixels and stay sharp at small sizes. -->
+  <rect x="0" y="0" width="32" height="32" rx="7" fill="#17181D" />
+  <circle cx="16" cy="11" r="6" fill="#FFFFFF" />
+  <circle cx="8" cy="24" r="3" fill="#6E7BF2" />
+  <circle cx="16" cy="24" r="3" fill="#6E7BF2" />
+  <circle cx="24" cy="24" r="3" fill="#6E7BF2" />
+</svg>

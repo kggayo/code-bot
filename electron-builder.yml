@@ -11,10 +11,12 @@ directories:
 files:
   - out/**
   - package.json
-# The window icon on Linux (see windowIcon in src/desktop/main/index.ts).
+# The window icon on Linux and Windows (see windowIcon in src/desktop/main/index.ts).
 extraResources:
   - from: build/icon.png
     to: icon.png
+  - from: build/icon.ico
+    to: icon.ico
 # Claude Code cannot run from inside the app archive; the main process points
 # the SDK at the unpacked copy (see claudeExecutable in src/desktop/main/index.ts).
 asarUnpack:
