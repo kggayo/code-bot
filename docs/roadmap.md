@@ -24,33 +24,25 @@ in the status table in `AGENTS.md`; the reasoning is in `docs/decisions.md`
 | 1.4 Earlier conversations | Built: list, read, reopen, archive. |
 | 1.5 More engines | Codex built and verified through the app with real Codex (decision 24). |
 
-### Still open after Milestone 1
+### Finished after Milestone 1 (2026-11-26)
 
-- **macOS.** Build and run on a Mac: `npm test`, `npm run e2e`, `npm run live`,
-  `npm run package`, `node scripts/packaged-check.ts`; or add `macos-latest` to
-  the CI matrix. Signing and notarization need the Apple Developer Program.
-  `openTerminal` on macOS (a `.command` file opened in Terminal) is untested.
-- **Signing** when the app is shared (decision 26 lists the options and the
-  `claude.exe` signature catch).
-- **Merging from the app.** Today a sub-agent's branch is handed over or merged
-  by another sub-agent; a "merge into the project folder" button for the user
-  is a possible addition.
-- **Routines from a conversation.** Routines are set up in the window
-  (decision 30). Letting the main bot create one when asked ("every morning,
-  check …") needs a tool that changes code-bot's own settings, which bots do not
-  have today; decide on that rule first.
-- **Updating in place on Linux.** The update button opens the release page on
-  Linux (decision 31). Replacing the running AppImage (`$APPIMAGE`) with the new
-  one and restarting is possible but untested.
+macOS and code signing moved to Milestone 3 (the owner, 2026-11-26). The rest
+of what was open was built:
+
+| Item | Outcome |
+|---|---|
+| Merging from the app | Built: a stopped sub-agent's branch is merged into the project folder, or pushed with a pull request opened, from its panel (decision 33). |
+| Routines from a conversation | Built: bots propose a routine on a card; the user creates it (decision 34). |
+| Updating in place on Linux | Built for the AppImage (decision 35). The `.deb` still opens the release page: replacing it needs `sudo apt`. |
+| Keys for MCP servers by name | Built: an HTTP MCP server names the environment variable that holds its token; the agents read it (decision 32). |
+
+### Still open
+
 - **claude.ai connectors for Claude Code sub-agents.** The connectors of the
   owner's Claude account (ClickUp, Gmail, …) do not load in Agent SDK sessions
   (decision 32). Re-test after an SDK upgrade; if a supported switch appears, a
   per-project "use my claude.ai connectors" setting is a small addition. Codex
   sub-agents already get the ChatGPT apps of the owner's Codex login.
-- **Keys for MCP servers by name.** A project's MCP servers take no keys
-  (decision 32). Naming an environment variable for an HTTP server's token
-  (Codex has `bearer_token_env_var`; Claude Code would need a header built from
-  it) would let such servers work without code-bot storing the key.
 
 ## Milestone 2: the main bot on the Azure VM, reachable over an API or MCP
 
@@ -105,6 +97,27 @@ decisions 9:
 The renderer only uses `CodeBotApi` and `CoreEvent`s (`src/desktop/renderer/src/api.ts`
 and `state.ts`). An HTTP implementation of the same interface would let the
 desktop app show a code-bot running on the VM.
+
+## Milestone 3: macOS and code signing
+
+Moved here from Milestone 1 by the owner (2026-11-26): there is no Mac to test
+on, and signing only matters once the app is shared beyond the owner.
+
+### 3.1 macOS
+
+Build and run on a Mac: `npm test`, `npm run e2e`, `npm run live`,
+`npm run package`, `node scripts/packaged-check.ts`; or add `macos-latest` to the
+CI matrix and the release workflow. Signing and notarization need the Apple
+Developer Program. Untested so far: `openTerminal` on macOS (a `.command` file
+opened in Terminal), the dock badge (`app.dock.setBadge`), and the update button
+(it opens the release page on macOS, decision 31).
+
+### 3.2 Code signing
+
+Sign the Windows installer and app when the app is shared (decision 26 lists
+the options and the catch with the bundled `claude.exe`'s own signature), and
+notarize the macOS build. Signed installers would also let the update button
+install without the "Windows protected your PC" step.
 
 ## Later
 

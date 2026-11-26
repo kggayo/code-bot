@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createWriteStream, existsSync, mkdirSync, rmSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { accessSync, chmodSync, constants, createWriteStream, existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { app, net, shell } from 'electron';
 import type { UpdateInfo } from '../../shared/types.ts';
 
@@ -9,9 +9,14 @@ import type { UpdateInfo } from '../../shared/types.ts';
  * Finds out whether a newer code-bot was released on GitHub and installs it.
  * Releases are built by .github/workflows/release.yml; each has the Windows
  * installer (code-bot-Setup-X.Y.Z.exe), the portable zip, the AppImage and the
- * deb. An installed Windows app downloads the installer, checks it against the
- * size and SHA-256 GitHub lists for it, starts it and quits so it can replace
- * the files. Everywhere else the release page is opened.
+ * deb. Every download is checked against the size and SHA-256 GitHub lists for
+ * it before it is used.
+ * - An installed Windows app downloads the installer, starts it and quits so it
+ *   can replace the files.
+ * - An AppImage downloads the new AppImage next to itself, puts it in place of
+ *   the running file (which stays mounted until code-bot quits) and restarts
+ *   into it, or starts it the next time.
+ * - Everywhere else the release page is opened.
  */
 
 const REPOSITORY = 'kggayo/code-bot';
@@ -31,6 +36,8 @@ export interface UpdaterDeps {
   changed(info: UpdateInfo): void;
   /** Asks whether code-bot may quit now (it may have sub-agents working) and, if so, quits. */
   quitToInstall(): boolean;
+  /** Asks the same, and if so quits and starts the program at execPath (the new AppImage). */
+  restart(execPath: string): boolean;
 }
 
 /** -1, 0 or 1 for versions like "0.3.1" (pre-release suffixes are ignored). */
@@ -42,6 +49,28 @@ export function compareVersions(a: string, b: string): number {
     if (diff !== 0) return diff > 0 ? 1 : -1;
   }
   return 0;
+}
+
+/**
+ * Where to ask for the newest release. CODE_BOT_UPDATE_FEED points it at a local address instead,
+ * for checking the update flow without publishing a release (scripts/appimage-update-check.ts);
+ * anything but localhost is ignored.
+ */
+function feed(): string {
+  const local = process.env.CODE_BOT_UPDATE_FEED;
+  return local && /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(local) ? local : LATEST;
+}
+
+/** The running AppImage, when code-bot is one and may replace it (its folder is writable). */
+function appImage(): string | null {
+  const path = process.env.APPIMAGE;
+  if (process.platform !== 'linux' || !path || !existsSync(path)) return null;
+  try {
+    accessSync(dirname(path), constants.W_OK);
+    return path;
+  } catch {
+    return null;
+  }
 }
 
 /** How this copy of code-bot can be updated, and why when it must be done by hand. */
@@ -57,15 +86,28 @@ function method(): Pick<UpdateInfo, 'method' | 'methodNote'> {
       : { method: 'manual', methodNote: 'This is the portable zip: download the new zip from the release page and unpack it over this folder.' };
   }
   if (process.platform === 'linux') {
-    return { method: 'manual', methodNote: 'Download the new AppImage or .deb from the release page.' };
+    if (appImage()) return { method: 'appimage', methodNote: null };
+    return process.env.APPIMAGE
+      ? { method: 'manual', methodNote: "This AppImage's folder cannot be written to: download the new AppImage from the release page." }
+      : {
+          method: 'manual',
+          methodNote: 'Installed from the .deb: download the new .deb from the release page and install it with sudo apt install ./<file>.deb.',
+        };
   }
   return { method: 'manual', methodNote: 'Download the new version from the release page.' };
+}
+
+/** The release file this copy installs itself from, by method. */
+function assetName(how: UpdateInfo['method'], version: string): string | null {
+  if (how === 'installer') return `${app.getName()}-Setup-${version}.exe`;
+  if (how === 'appimage') return `${app.getName()}-${version}.AppImage`;
+  return null;
 }
 
 export class Updater {
   private readonly deps: UpdaterDeps;
   private info: UpdateInfo;
-  private installer: Asset | null = null;
+  private asset: Asset | null = null;
   private checking: Promise<UpdateInfo> | undefined;
   private installing = false;
 
@@ -76,6 +118,7 @@ export class Updater {
       latest: null,
       available: false,
       ...method(),
+      installed: null,
       url: `https://github.com/${REPOSITORY}/releases`,
       notes: null,
       checkedAt: null,
@@ -95,22 +138,23 @@ export class Updater {
       .then((release) => {
         const latest = String(release.tag_name ?? '').replace(/^v/, '');
         const assets = Array.isArray(release.assets) ? (release.assets as Record<string, unknown>[]) : [];
-        const installer = assets.find((asset) => asset.name === `${app.getName()}-Setup-${latest}.exe`);
-        this.installer = installer
+        const how = method();
+        const wanted = assetName(how.method, latest);
+        const found = wanted ? assets.find((asset) => asset.name === wanted) : undefined;
+        this.asset = found
           ? {
-              name: String(installer.name),
-              url: String(installer.browser_download_url),
-              size: Number(installer.size) || 0,
-              digest: typeof installer.digest === 'string' ? installer.digest : null,
+              name: String(found.name),
+              url: String(found.browser_download_url),
+              size: Number(found.size) || 0,
+              digest: typeof found.digest === 'string' ? found.digest : null,
             }
           : null;
         const available = Boolean(latest) && compareVersions(latest, this.info.current) > 0;
-        const how = method();
         this.update({
           latest: latest || null,
           available,
-          ...(how.method === 'installer' && !this.installer
-            ? { method: 'manual', methodNote: 'This release has no Windows installer: download it from the release page.' }
+          ...(how.method !== 'manual' && !this.asset
+            ? { method: 'manual', methodNote: `This release has no ${how.method === 'installer' ? 'Windows installer' : 'AppImage'}: download it from the release page.` }
             : how),
           url: typeof release.html_url === 'string' ? release.html_url : this.info.url,
           notes: typeof release.body === 'string' ? release.body.slice(0, 20_000) : null,
@@ -129,18 +173,22 @@ export class Updater {
     return this.checking;
   }
 
-  /** Installs the newest release: runs its installer, or opens the release page. */
+  /** Installs the newest release: runs its installer, replaces the AppImage, or opens the release page. */
   async install(): Promise<void> {
     if (!this.info.checkedAt) await this.check();
     if (!this.info.available) throw new Error(`code-bot ${this.info.current} is the newest version`);
-    if (this.info.method === 'manual' || !this.installer) {
+    if (this.info.method === 'manual' || !this.asset) {
       await shell.openExternal(this.info.url ?? `https://github.com/${REPOSITORY}/releases`);
       return;
     }
     if (this.installing) throw new Error('The update is already downloading');
     this.installing = true;
     try {
-      const file = await this.download(this.installer);
+      if (this.info.method === 'appimage') {
+        await this.installAppImage(this.asset);
+        return;
+      }
+      const file = await this.download(this.asset, join(app.getPath('temp'), 'code-bot-update'), this.asset.name);
       if (!this.deps.quitToInstall()) {
         this.update({ downloadPercent: null, error: 'Not installed: code-bot was not closed. Try again when the sub-agents are done.' });
         return;
@@ -155,8 +203,26 @@ export class Updater {
     }
   }
 
+  /**
+   * Downloads the new AppImage next to the running one and renames it over it. The running copy
+   * keeps working (it is mounted from the old file) until code-bot restarts into the new one.
+   */
+  private async installAppImage(asset: Asset): Promise<void> {
+    const target = appImage();
+    if (!target) throw new Error('this AppImage cannot be replaced; download the new one from the release page');
+    if (this.info.installed !== this.info.latest) {
+      const file = await this.download(asset, dirname(target), `.${basename(target)}.download`);
+      chmodSync(file, 0o755);
+      renameSync(file, target);
+      this.update({ installed: this.info.latest, downloadPercent: null });
+    }
+    if (!this.deps.restart(target)) {
+      this.update({ error: null, methodNote: `code-bot ${this.info.latest} is in place: it starts the next time you open code-bot.` });
+    }
+  }
+
   private async fetchLatest(): Promise<Record<string, unknown>> {
-    const response = await net.fetch(LATEST, {
+    const response = await net.fetch(feed(), {
       headers: {
         Accept: 'application/vnd.github+json',
         'User-Agent': `code-bot/${this.info.current}`,
@@ -169,11 +235,10 @@ export class Updater {
     return (await response.json()) as Record<string, unknown>;
   }
 
-  /** Downloads the installer into a temporary folder and checks it. Returns its path. */
-  private async download(asset: Asset): Promise<string> {
-    const folder = join(app.getPath('temp'), 'code-bot-update');
+  /** Downloads a release file into `folder` as `name` and checks it. Returns its path. */
+  private async download(asset: Asset, folder: string, name: string): Promise<string> {
     mkdirSync(folder, { recursive: true });
-    const file = join(folder, asset.name);
+    const file = join(folder, name);
     rmSync(file, { force: true });
     this.update({ downloadPercent: 0, error: null });
     const response = await net.fetch(asset.url, { headers: { 'User-Agent': `code-bot/${this.info.current}` } });

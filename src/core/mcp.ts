@@ -9,6 +9,8 @@ import { CodeBotError } from './util.ts';
 export const MAX_MCP_SERVERS = 20;
 const MAX_ARGS = 50;
 const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
+/** An environment variable's name (never its value: code-bot stores no tokens). */
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,99}$/;
 const CONTROL = /[\u0000-\u001f\u007f]/;
 
 /** The servers as entered in bot settings, checked and tidied; throws a CodeBotError naming the problem. */
@@ -46,7 +48,14 @@ export function cleanMcpServers(value: unknown): McpServer[] {
         throw new CodeBotError('invalid', `Leave the sign-in out of the address of "${name}": code-bot does not keep credentials`);
       }
       if (text.length > 2000) throw new CodeBotError('invalid', `The address of "${name}" is too long`);
-      return { type: 'http', name, url: url.toString(), allowTools };
+      const tokenEnvVar = String(raw.tokenEnvVar ?? '').trim() || null;
+      if (tokenEnvVar && !ENV_NAME.test(tokenEnvVar)) {
+        throw new CodeBotError(
+          'invalid',
+          `"${tokenEnvVar}" is not an environment variable name: use letters, digits and "_", not starting with a digit (the name, not the token itself)`,
+        );
+      }
+      return { type: 'http', name, url: url.toString(), tokenEnvVar, allowTools };
     }
 
     if (raw.type !== 'stdio') throw new CodeBotError('invalid', `Say how to reach the MCP server "${name}": a command or an address`);

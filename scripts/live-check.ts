@@ -278,17 +278,47 @@ try {
     await page.locator('.panel .panel-head button.link').first().click();
   });
 
+  await check("the worktree sub-agent's branch is merged into the project folder from its panel", async () => {
+    await page.locator('.panel').getByTestId('subagent-item').first().click();
+    const actions = page.locator('.panel').getByTestId('branch-actions');
+    await actions.getByRole('button', { name: 'Merge into main' }).click();
+    await actions.getByRole('button', { name: 'Merge', exact: true }).click();
+    await actions.getByTestId('branch-merged').waitFor({ timeout: MINUTES });
+    assert.equal(readFileSync(join(projectDir, 'notes.md'), 'utf8').trim(), 'from the worktree');
+    await page.locator('.panel .panel-head button.link').first().click();
+  });
+
   await check("an MCP server from the project's settings reaches a sub-agent, and its allowed tool runs without asking", async () => {
     await addProbeServer(true);
-    await say('Have a sub-agent call the probe tool of its "probe" MCP server once and report exactly what the tool returned. Nothing else.');
+    await say(
+      'Have a sub-agent call the probe tool of its "probe" MCP server once and report exactly what the tool returned. Nothing else. Start it with the project\'s normal permissions, not plan mode.',
+    );
     const approvals = await approveUntilQuiet(page);
     console.log(`       (${approvals} approval(s) given)`);
     const task = await newestTask('claude');
+    // In plan mode every MCP tool asks, by design; then this check says nothing.
+    assert.notEqual(task.permissionMode, 'plan', 'the project bot started the sub-agent in plan mode, where every MCP tool asks');
     assert.ok(task.lastResult?.includes(PROBE_MARKER), `the sub-agent did not get the marker: ${task.lastResult}`);
     const view = (await page.evaluate((id) => window.codeBot.call('getTask', [id]), task.id)) as TaskView;
     const asked = view.events.filter((event) => event.type === 'request' && JSON.stringify(event.data).includes('mcp__probe'));
     assert.equal(asked.length, 0, 'the allowed probe tool asked for approval');
     if (shots) await page.screenshot({ path: join(shots, 'live-4b-mcp.png') });
+  });
+
+  await check('asked in the conversation, the main bot proposes a routine, which you create from its card', async () => {
+    await open('bot-main', 'Main bot');
+    await say('Every weekday at 09:00, ask the heron project bot for a one-line status. Please set that up as a routine.');
+    const card = conversation.getByTestId('routine-proposal').last();
+    await card.waitFor({ timeout: 3 * MINUTES });
+    await card.getByText('Every weekday at 09:00').waitFor();
+    assert.equal(((await page.evaluate(() => window.codeBot.call('listRoutines', []))) as unknown[]).length, 0, 'created before you clicked');
+    await card.scrollIntoViewIfNeeded();
+    if (shots) await page.screenshot({ path: join(shots, 'live-4c-routine.png') });
+    await card.getByRole('button', { name: 'Create routine' }).click();
+    await card.getByTestId('routine-proposal-outcome').getByText(/^Created/).waitFor();
+    const routines = (await page.evaluate(() => window.codeBot.call('listRoutines', []))) as { schedule: unknown }[];
+    assert.deepEqual(routines.map((routine) => routine.schedule), [{ kind: 'daily', time: '09:00', days: [1, 2, 3, 4, 5] }]);
+    await idle(page);
   });
   if (withCodex) {
     let codexModel = '';

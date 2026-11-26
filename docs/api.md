@@ -33,9 +33,10 @@ are `CodeBotError` with a `code`: `invalid`, `not_found`, `conflict` or `busy`.
     "maxBudgetUsd": 5,             // per sub-agent, the engine's estimate; null = no limit
     "mcpServers": [                // McpServer[]: added to the agents' own MCP servers, read at every turn (max 20)
       { "type": "stdio", "name": "playwright", "command": "npx", "args": ["@playwright/mcp@latest"], "allowTools": true },
-      { "type": "http", "name": "docs", "url": "https://docs.example.com/mcp", "allowTools": false }
+      { "type": "http", "name": "docs", "url": "https://docs.example.com/mcp", "tokenEnvVar": "DOCS_MCP_TOKEN", "allowTools": false }
     ]                              // name: letters, digits, "_", "-" (tools are mcp__<name>__<tool>); allowTools: run its
-                                   // tools without asking (never in plan mode); no keys or tokens are stored
+                                   // tools without asking (never in plan mode); tokenEnvVar: the NAME of the environment
+                                   // variable holding an HTTP server's bearer token (the agent reads it); no tokens are stored
   },
   "threadId": "c_9f…",             // current conversation
   "createdAt": "…", "updatedAt": "…",
@@ -73,7 +74,9 @@ are `CodeBotError` with a `code`: `invalid`, `not_found`, `conflict` or `busy`.
     "path": "C:\\Users\\me\\AppData\\Roaming\\code-bot\\worktrees\\t_921b524ccc",
     "branch": "code-bot/t_921b524ccc-fix-null-check-in-orderservice",
     "base": "main", "baseCommit": "4be1…", "folder": "C:\\src\\webshop",
-    "removed": false               // true once archived (the branch may remain)
+    "removed": false,              // true once archived (the branch may remain)
+    "merged": { "into": "main", "commit": "b85395b…", "at": "…" },        // set by mergeBranch
+    "pullRequest": { "remote": "origin", "url": "https://github.com/…/pull/12", "created": true, "at": "…" }  // set by openPullRequest
   },
   "archivedAt": null,
   "createdAt": "…", "updatedAt": "…"
@@ -122,10 +125,26 @@ are `CodeBotError` with a `code`: `invalid`, `not_found`, `conflict` or `busy`.
   "lastRunAt": "…", "lastError": null,
   "createdAt": "…", "updatedAt": "…" }
 
+// BranchStatus (getBranchStatus, mergeBranch, openPullRequest)
+{ "taskId": "t_921b524ccc", "branch": "code-bot/t_921b524ccc-fix-null-check-in-orderservice",
+  "folder": "C:\src\webshop", "folderBranch": "main",
+  "ahead": 2,                      // commits on the branch that the folder's branch lacks
+  "folderDirty": false, "worktreeDirty": false,
+  "remote": "origin", "githubRepo": "acme/webshop", "gh": true,
+  "mergeBlocked": null,            // or why not: "The project folder has uncommitted changes on main; …"
+  "pushBlocked": null,
+  "merged": null, "pullRequest": null }
+
+// RoutineProposal (thread event routine.proposed)
+{ "id": "rp_…", "botId": "b_…", "botName": "webshop", "title": "Weekday stand-up notes",
+  "prompt": "Summarise what your sub-agents did yesterday.",
+  "schedule": { "kind": "daily", "time": "09:00", "days": [1, 2, 3, 4, 5] }, "nextRunAt": "…" }
+
 // UpdateInfo (getUpdate, checkForUpdate; desktop only)
 { "current": "0.3.1", "latest": "0.4.0", "available": true,
-  "method": "installer",           // installer: downloads and starts the Windows installer; manual: opens the release page
-  "methodNote": null,              // why it is manual here (portable zip, Linux, running from source)
+  "method": "installer",           // installer: the Windows installer; appimage: replaces the running AppImage; manual: opens the release page
+  "methodNote": null,              // why it is manual here (portable zip, .deb, running from source)
+  "installed": null,               // appimage: the version already put in place, starting at the next restart
   "url": "https://github.com/kggayo/code-bot/releases/tag/v0.4.0", "notes": "…",
   "checkedAt": "…", "downloadPercent": null, "error": null }
 
@@ -162,6 +181,9 @@ id (`scope: bot`) or `"app"` (`scope: app`).
 | `sendToTask(taskId, text)` | The user writes to a sub-agent directly: steers it, or continues its session. Unarchives it. Answers its held requests' place: they are withdrawn and it resumes with the message. |
 | `cancelTask(taskId)` | Stops a sub-agent (also one with held requests). |
 | `setTaskArchived(taskId, archived, { discardChanges? })` | Hides a stopped sub-agent (or shows it again). Archiving removes its worktree folder; the branch is deleted only if it is merged. Refused (`conflict`) while it works, or when its worktree has uncommitted changes unless `discardChanges`. |
+| `getBranchStatus(taskId)` | `BranchStatus` of a sub-agent that worked on its own worktree branch: the project folder's current branch, commits on the sub-agent's branch it lacks (`ahead`), uncommitted changes in the folder or the worktree, the remote and whether it is GitHub, whether `gh` is installed, why merging or pushing is not possible now (`mergeBlocked`, `pushBlocked`), and what was done already (`merged`, `pullRequest`). `invalid` for a sub-agent without a branch. |
+| `mergeBranch(taskId)` | The user's "Merge into <branch>": runs `git merge` of the sub-agent's branch into the branch the project folder is on, with the user's git settings and identity. Refused (`conflict`) while the sub-agent works, when the folder has uncommitted changes to tracked files, is detached, or already has every commit. A conflicting merge is aborted (the folder is left as it was) and the error names the files. Records `worktree.merged` and a `branch.merged` task event; returns the new `BranchStatus`. |
+| `openPullRequest(taskId)` | The user's "Push and open pull request": `git push --set-upstream <remote> <branch>` (the remote of the branch the worktree came from, else `origin`), then on GitHub `gh pr create --repo <owner/repo> --head <branch> --base <base>` with the task's title and last report. Uses the user's own git credentials and gh sign-in; no prompts. Without gh, `pullRequest.url` is GitHub's page to create the pull request (the window opens it); a remote that is not GitHub is only pushed. An existing pull request for the branch is returned instead of failing. Records `worktree.pullRequest` and a `branch.pushed` task event. |
 | `listRequests()` | Every open question and approval, including held ones from before a restart. |
 | `respond(taskId, requestId, response)` | Answers a request. `response` is `{ "decision": "allow", "answers"?: { "<question text>": "<answer>" } }` or `{ "decision": "deny", "message"?: "…" }`. Answering the last held request of a sub-agent resumes it. |
 | `getUsage()` | `EngineUsage[]`: the plan limits as last read (reads them the first time). |
@@ -171,6 +193,8 @@ id (`scope: bot`) or `"app"` (`scope: app`).
 | `updateRoutine(routineId, patch)` | Changes it; a new schedule or `enabled` plans the next run again from now. |
 | `deleteRoutine(routineId)` | Removes it. |
 | `runRoutine(routineId)` | Sends its message now ("Run now"); the schedule stays. |
+| `acceptRoutineProposal(botId, proposalId)` | The card's Create: creates the routine a bot proposed (`routine.proposed`) in its current conversation, enabled, and records `routine.proposal.closed` (`outcome: "created"`). `not_found` for a proposal in an earlier conversation; `conflict` when it was already created or dismissed. Returns the `Routine`. |
+| `dismissRoutineProposal(botId, proposalId)` | The card's Dismiss: records `routine.proposal.closed` (`outcome: "dismissed"`); nothing is created. |
 | `checkFolders(paths)` | `[{ path, exists }]` for absolute paths of existing folders. |
 | `pickFolders()` | Desktop only: the native folder picker; `[]` if cancelled. |
 | `openExternal(url)` | Desktop only: opens an http(s) link in the default browser. |
@@ -180,7 +204,7 @@ id (`scope: bot`) or `"app"` (`scope: app`).
 | `openInTerminal(taskId)` | Desktop only: opens a terminal in the sub-agent's folder that continues its session interactively (`claude --resume <id>`, `codex resume <id>`). Refused while it is working. |
 | `getUpdate()` | Desktop only: `UpdateInfo` as last checked. |
 | `checkForUpdate()` | Desktop only: asks GitHub for the newest release of kggayo/code-bot. Never fails; a problem is in `error`. The app also checks 15 seconds after start and every 6 hours (not in demo mode, nor with `CODE_BOT_NO_UPDATE_CHECK=1`). |
-| `installUpdate()` | Desktop only: `method: "installer"` downloads `code-bot-Setup-<version>.exe`, checks its size and the SHA-256 GitHub lists, asks to quit if sub-agents work, starts the installer and quits. `manual` opens the release page. |
+| `installUpdate()` | Desktop only: `method: "installer"` downloads `code-bot-Setup-<version>.exe`, checks its size and the SHA-256 GitHub lists, asks to quit if sub-agents work, starts the installer and quits. `appimage` downloads `code-bot-<version>.AppImage` next to the running one (`$APPIMAGE`), checks it the same way, renames it over the running file and restarts into it after asking; declined, `installed` says the new version starts next time, and calling it again restarts. `manual` opens the release page. |
 
 For questions, `answers` maps each question's exact text to the chosen option
 label or free text; several labels for a multi-select question are joined with
@@ -200,6 +224,8 @@ label or free text; several labels for a multi-select question are joined with
 | `request.surfaced` | `SurfacedData`: `{ request, taskTitle, botName }` | A question or approval put to the user here. |
 | `request.closed` | `ClosedData`: `{ requestId, decision, by, answers?, message? }` | It was answered. `decision`: `allow`, `deny` or `withdrawn`; `by`: `user`, `bot` (the project bot answered) or `system` (the sub-agent stopped). `answers`: what was answered (questions); `message`: the note with a decline. |
 | `routine.run` | `RoutineRunData`: `{ routineId, title, text, manual }` | A routine sent its message to this bot; a turn follows. `manual` when it was "Run now". |
+| `routine.proposed` | `RoutineProposal` | The bot proposed a routine (`propose_routine`); the window shows a card with Create and Dismiss. Nothing exists yet. |
+| `routine.proposal.closed` | `RoutineProposalClosed`: `{ id, outcome, routineId }` | The user created it (`outcome: "created"`, with the routine's id) or dismissed it. |
 | `turn.end` | `TurnEndData`: `{ ok, error?, forwardedTo? }` | The turn ended. `forwardedTo: "main"` when the reply was passed on to the main bot. |
 | `thread.reset` | `{}` | First event of a new conversation (the event's `id` is the new thread). |
 
@@ -220,7 +246,9 @@ label or free text; several labels for a multi-select question are joined with
 | `state` | `{ state, error? }` | The task changed state. |
 | `settings` | `{ permissionMode }` | Its project bot changed its permission mode; it applies from its next turn. |
 | `archived` / `unarchived` | `{ archivedAt }` | It was archived, or shown again. |
-| `worktree` | `{ worktree }` | Its worktree was removed or brought back. |
+| `worktree` | `{ worktree }` | Its worktree was removed or brought back, or its branch was merged or pushed. |
+| `branch.merged` | `{ into, commit, fastForward }` | The user merged its branch into the project folder's branch. |
+| `branch.pushed` | `{ branch, remote, url, created }` | The user pushed its branch; `url` is the pull request (`created: true`) or GitHub's page to create one, null for other remotes. |
 | `deleted` | `{}` | Live only (`seq: 0`): retention deleted it and its history. |
 
 ## Bot events (`scope: "bot"`, never stored)
@@ -247,7 +275,8 @@ label or free text; several labels for a multi-select question are joined with
 Defined in `src/core/tools.ts`.
 
 Main bot: `list_project_bots`, `send_to_project_bot { bot, message }`,
-`project_bot_status { bot }`.
+`project_bot_status { bot }`, and the routine tools below (its routines may
+message itself or a project bot: `propose_routine`'s `bot`).
 
 Project bot: `list_subagents { active_only? }`,
 `start_subagent { title, brief, role?, for_subagent?, folder?, model?, effort?, permission_mode?, worktree? }`
@@ -264,7 +293,16 @@ log, show, branch, ls-files; `folder` may also be one of its sub-agents'
 worktrees). Sub-agent summaries include their `branch`, `role`,
 `for_subagent` and `permission_mode`.
 
+Both kinds of bot: `list_routines` (read-only: their routines, all of them for
+the main bot, with the computer's local time now) and
+`propose_routine { bot?, title, message, kind, time?, days?, minutes?, at? }`
+(`kind`: `daily` with `time` HH:MM and `days` like `["mon","fri"]`, `interval`
+with `minutes` 15-10080, `once` with a local `at` like `2026-11-27T15:00`). It
+creates nothing: it checks the routine and shows it as a card
+(`routine.proposed`) that the user creates or dismisses.
+
 Messages to a project bot from the user, the main bot or a routine end with a
 list of its recent sub-agents (`prompts.recentSubagents`: up to 8 unarchived
-ones active in the last 14 days, with role, state and branch), so a follow-up
+ones active in the last 14 days, with role, state and branch, and whether the
+user merged or pushed that branch), so a follow-up
 goes to the sub-agent that has the work.

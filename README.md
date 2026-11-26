@@ -37,19 +37,26 @@ and a banner with a Sign in button when a coding agent is not signed in. And:
   5-hour and weekly limits is used and when they reset, and what each bot and
   sub-agent used (the agents' own estimates).
 - **Routines**: messages sent to a bot on a schedule (on chosen days at a time,
-  every few hours, or once), with the next ones in the sidebar.
+  every few hours, or once), with the next ones in the sidebar. Ask a bot for
+  one ("every weekday at 9, check …") and it proposes it on a card you create
+  with one click.
 - **Readable approvals**: plans, commands, file edits and patches shown as
   such, and the answer kept on a card once given.
 - **The taskbar icon** shows how many questions and approvals wait, and
   flashes when a new one arrives.
 - **Updates**: code-bot tells you when a new version is out; on an installed
-  Windows copy one click downloads and starts the installer.
+  Windows copy one click downloads and starts the installer, and an AppImage
+  replaces itself and restarts.
+- **A sub-agent's branch**: when sub-agents work in their own git worktrees,
+  a finished one's branch can be merged into your project folder, or pushed
+  with a pull request opened, from its panel.
 - **Resizable panes**: drag the edges between the bot list, the conversation
   and the side panel.
 - **MCP servers per project**: sub-agents already use the MCP servers of your
   Claude Code or Codex setup; a project's settings can add more for its
   sub-agents only (a command such as `npx @playwright/mcp@latest`, or an
-  address), each asking before every tool call or, if you tick it, not.
+  address with its token taken from an environment variable you name), each
+  asking before every tool call or, if you tick it, not.
 
 ## Install
 

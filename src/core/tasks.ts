@@ -413,6 +413,11 @@ export class TaskManager {
   }
 
   /** Records a change to the sub-agent's worktree (removed or brought back). */
+  /** Records something that happened to a sub-agent outside its runs (its branch was merged or pushed). */
+  note(taskId: string, type: string, data: unknown): void {
+    this.emit(taskId, this.getTask(taskId).botId, type, data);
+  }
+
   setWorktree(taskId: string, worktree: TaskWorktree | null): Task {
     const task = this.getTask(taskId);
     const updated = this.store.updateTask(taskId, { worktree }, false);

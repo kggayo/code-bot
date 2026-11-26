@@ -66,6 +66,7 @@ sub-agent (but can open one and write to it).
 | `src/core/mcp.ts` | MCP servers a project gives its sub-agents: checking them (`cleanMcpServers`), how a command starts (`launchCommand`, `cmd /c` on Windows), whose tools may run without asking (`allowedServers`). |
 | `src/shared/command-line.ts` | Splits a typed command line into words and joins them back (the window's MCP server field). |
 | `src/core/worktrees.ts` | Creating, removing and restoring sub-agents' git worktrees; copying untracked files into them. |
+| `src/core/branches.ts` | Handing over a sub-agent's branch on the user's click: what can be done (`branchFacts`), merging it into the project folder, pushing it and opening a pull request with gh. |
 | `src/core/version.ts` | The version agents see (kept equal to `package.json` by a test). |
 | `src/core/brain.ts` | `Brain` interface, `BotTool`, and `ClaudeBrain`. |
 | `src/core/scripted-brain.ts` | `ScriptedBrain`: deterministic bots for tests and demo mode. |
@@ -80,7 +81,7 @@ sub-agent (but can open one and write to it).
 | `src/desktop/main/index.ts` | Electron main process: data folder, engines and brain selection, window, quit handling, single instance. |
 | `src/desktop/main/ipc.ts` | The IPC handler: sender check, argument validation for every method, desktop-only methods (folder picker, notifications, open link/folder, terminals, updates). |
 | `src/desktop/main/badge.ts` | The waiting count on the taskbar or dock icon: an overlay badge drawn pixel by pixel on Windows, the dock badge on macOS, the launcher count on Linux. |
-| `src/desktop/main/updates.ts` | `Updater`: asks GitHub for the newest release, downloads and checks the Windows installer, starts it. |
+| `src/desktop/main/updates.ts` | `Updater`: asks GitHub for the newest release, downloads and checks the Windows installer and starts it, or replaces a Linux AppImage and restarts. |
 | `src/desktop/main/terminal.ts` | Opens a terminal window running one program (sign-in, continuing a session) on Windows, macOS and Linux. |
 | `src/desktop/preload/index.ts` | Exposes `window.codeBot` (the `DesktopBridge`). Built as one CommonJS file. |
 | `src/desktop/renderer/` | The interface. `src/state.ts` holds all window state; `src/components/` the views. |
@@ -241,13 +242,18 @@ tools without asking".
   `thread/start` and `thread/resume`, which adds to its own servers instead of
   replacing them, with `default_tools_approval_mode` `approve` (allowed) or
   `prompt`.
-- No keys or tokens are stored (requirement 8): a server that needs one reads it
-  from the environment code-bot runs in, which the agents pass on.
+- No keys or tokens are stored (requirement 8). A command reads what it needs
+  from the environment code-bot runs in, which the agents pass on. An HTTP
+  server can name the environment variable holding its bearer token
+  (`tokenEnvVar`): Claude Code gets the header `Authorization: Bearer ${NAME}`
+  and fills in the value from its own environment; Codex gets
+  `bearer_token_env_var = NAME`. code-bot never reads the value.
 - The project bot's prompt names them, so it can mention them in briefs; it
   does not get them itself.
-- Seen with Agent SDK 0.3.325: a Claude Code session given a server whose tools
-  are allowed also connected the account's claude.ai connectors, which do not
-  load in SDK sessions otherwise. Their tools ask like any other.
+- Seen with Agent SDK 0.3.325: the account's claude.ai connectors do not load in
+  SDK sessions, but did in sessions given a stdio server whose tools are
+  allowed (not with an allowed HTTP server). Their tools ask like any other;
+  code-bot relies on this neither way.
 
 ### Worktrees
 
@@ -275,6 +281,34 @@ the branch at the same path, so its session can continue. A folder that is not
 in a git repository, or has no commits, cannot have worktrees: the tool call
 fails with that reason.
 
+### Handing over a sub-agent's branch
+
+When a sub-agent that worked in its own worktree has stopped, its panel shows
+what its branch holds (`getBranchStatus`) and two buttons, each with a confirm
+step (`src/core/branches.ts`). Like worktrees, these git commands change the
+repository, so code-bot runs them on the user's click, never on a bot's.
+
+- **Merge into <branch>** (`mergeBranch`): `git merge --no-edit <branch>` in the
+  project folder, into the branch it is on now, with the user's own git
+  settings and identity. It waits for a clean folder (no uncommitted changes to
+  tracked files) and a branch to merge into; a conflicting merge is aborted, so
+  the folder is left as it was, and the error names the files and suggests the
+  sub-agent merges the other way first.
+- **Push and open pull request** (`openPullRequest`): `git push --set-upstream`
+  to the remote of the branch the worktree came from (else `origin`), then
+  `gh pr create` into that branch, titled after the task with its last report
+  as the body. It uses the user's own git credentials and gh sign-in, with
+  prompts switched off (`GIT_TERMINAL_PROMPT=0`, `GH_PROMPT_DISABLED=1`).
+  Without gh the window opens GitHub's page to create the pull request; a remote
+  that is not on GitHub is only pushed. A branch that already has a pull
+  request gets its address back.
+
+Both are refused while the sub-agent works. What was done is kept on the
+task's worktree (`merged`, `pullRequest`), recorded as task events
+(`branch.merged`, `branch.pushed`), and shown to the project bot in its list
+of recent sub-agents. A merged branch is deleted when the sub-agent is
+archived. Tests pass `ghExecutable: null` so the machine's gh is never used.
+
 ### Routines
 
 A routine (`routines` table) sends a bot (main or project) a message on a
@@ -287,8 +321,19 @@ user). Its next run is then planned: interval routines keep their rhythm from
 the planned time, daily ones take the next chosen day, once routines are
 switched off. Runs missed while code-bot was closed happen once at start-up.
 The window lists the next routines in the sidebar and manages them in the
-Routines dialog. Bots cannot create routines: they have no tools that change
-code-bot itself.
+Routines dialog.
+
+Bots cannot create routines, but they can propose one (decision 34). When the
+user asks for something on a schedule, a bot's `propose_routine` checks the
+routine (the same rules as the dialog, and that it will run at all) and records
+a `routine.proposed` event in its own conversation; the window shows it as a
+card with the schedule, the first run and the message. Only the user's Create
+(`acceptRoutineProposal`) makes the routine; Dismiss closes the card. Either
+records `routine.proposal.closed`. A proposal is found by its id among the
+events of the bot's current conversation, so one left in an earlier
+conversation can no longer be created. The main bot may propose routines for
+itself or a project bot; a project bot only for itself. `list_routines` shows
+them their routines and the local time.
 
 ### Usage
 
@@ -502,7 +547,10 @@ cut. The event names and shapes are a public contract; they are listed in
   requests, bots and routines in case an event was missed.
 - The sidebar shows the plan limits (`Usage.tsx`), the next routines, and an
   "Update to …" button when a newer release is out; Settings has the full
-  limits and an Updates section.
+  limits and an Updates section. An installed Windows copy runs the new
+  installer; an AppImage downloads the new AppImage next to itself, checks it,
+  renames it over the running file (which stays mounted until code-bot quits)
+  and restarts into it, or starts it next time (decision 35).
 - The taskbar (Windows), dock (macOS) or launcher (Linux) icon shows how many
   questions and approvals wait (`badge.ts`), and the taskbar button flashes
   when one arrives while the window is not focused.
@@ -522,8 +570,16 @@ cut. The event names and shapes are a public contract; they are listed in
 - Worktrees are created and removed by code-bot itself when a project is set to
   isolate sub-agents, never on a bot's request; the bots' `git` stays read-only.
 - Updates come only from the GitHub releases of kggayo/code-bot over HTTPS. The
-  installer is checked against the size and SHA-256 digest GitHub lists for the
-  asset before it runs, and only when the user asked for the update.
+  installer or AppImage is checked against the size and SHA-256 digest GitHub
+  lists for the asset before it is used, and only when the user asked for the
+  update. `CODE_BOT_UPDATE_FEED` (for update checks) is honoured only for a
+  localhost address.
+- A sub-agent's branch is merged or pushed only on the user's click in the
+  window, never by a bot, with the user's own git credentials and gh sign-in;
+  a merge never starts with uncommitted changes in the project folder and is
+  undone on a conflict.
+- Bots can only propose routines; a routine exists once the user creates it
+  from the card.
 - Bots cannot change files or run commands; project bots read only their own
   folders, and git is limited to read-only subcommands with arguments that write
   or run programs refused (`src/core/git.ts`).

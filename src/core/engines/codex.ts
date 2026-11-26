@@ -176,7 +176,11 @@ export function codexMcpConfig(
   const config: Json = {};
   const allowed = new Set(allowedServers(servers ?? [], permissionMode));
   for (const server of servers ?? []) {
-    const reach = server.type === 'http' ? { url: server.url } : launchCommand(server.command, server.args, platform);
+    // Codex reads the token from the named environment variable itself.
+    const reach =
+      server.type === 'http'
+        ? { url: server.url, ...(server.tokenEnvVar ? { bearer_token_env_var: server.tokenEnvVar } : {}) }
+        : launchCommand(server.command, server.args, platform);
     config[`mcp_servers.${server.name}`] = { ...reach, default_tools_approval_mode: allowed.has(server) ? 'approve' : 'prompt' };
   }
   return config;

@@ -30,6 +30,7 @@ import { Updater } from './updates.ts';
  *   CODE_BOT_CODEX_EXECUTABLE   Codex binary to use instead of codex on the PATH
  *   CODE_BOT_NO_QUIT_PROMPT=1   quit without asking even when sub-agents are working
  *   CODE_BOT_NO_UPDATE_CHECK=1  never look for a newer release by itself
+ *   CODE_BOT_UPDATE_FEED        a localhost address to ask for the newest release instead of GitHub (update checks)
  */
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -193,6 +194,13 @@ function start(): void {
     quitToInstall: () => {
       if (!confirmStop(window && !window.isDestroyed() ? window : undefined)) return false;
       allowClose = true;
+      setImmediate(() => app.quit());
+      return true;
+    },
+    restart: (execPath) => {
+      if (!confirmStop(window && !window.isDestroyed() ? window : undefined)) return false;
+      allowClose = true;
+      app.relaunch({ execPath, args: process.argv.slice(1) });
       setImmediate(() => app.quit());
       return true;
     },

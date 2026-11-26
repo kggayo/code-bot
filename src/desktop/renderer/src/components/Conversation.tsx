@@ -5,6 +5,8 @@ import type {
   ClosedData,
   CoreEvent,
   InboundData,
+  RoutineProposal,
+  RoutineProposalClosed,
   RoutineRunData,
   SurfacedData,
   TurnEndData,
@@ -15,6 +17,7 @@ import { useAppState } from '../state.ts';
 import { Composer } from './Composer.tsx';
 import { ConversationMenu } from './ConversationMenu.tsx';
 import { RequestCard } from './RequestCard.tsx';
+import { RoutineProposalCard } from './Routines.tsx';
 import { activity } from './Team.tsx';
 import { MarkdownText, RichText, TaskChip } from './Text.tsx';
 
@@ -80,11 +83,19 @@ const ThreadItem = memo(function ThreadItem({
   event,
   closed,
   openRequests,
+  proposals,
+  botId,
+  readOnly,
 }: {
   event: CoreEvent;
   closed: Map<string, ClosedData>;
   /** Open requests: id to whether it is held from before a restart. */
   openRequests: Map<string, boolean>;
+  /** Routine proposals the user created or dismissed, by id. */
+  proposals: Map<string, RoutineProposalClosed>;
+  botId: string;
+  /** An earlier conversation, shown read-only. */
+  readOnly: boolean;
 }) {
   const data = event.data as Record<string, unknown>;
   switch (event.type) {
@@ -137,6 +148,10 @@ const ThreadItem = memo(function ThreadItem({
           <div className="routine-text">{run.text}</div>
         </div>
       );
+    }
+    case 'routine.proposed': {
+      const proposal = data as unknown as RoutineProposal;
+      return <RoutineProposalCard botId={botId} proposal={proposal} closed={proposals.get(proposal.id)} readOnly={readOnly} />;
     }
     case 'request.surfaced': {
       const surfaced = data as unknown as SurfacedData;
@@ -217,6 +232,16 @@ export function Conversation({ bot }: { bot: BotView }) {
     }
     return map;
   }, [events]);
+  const proposals = useMemo(() => {
+    const map = new Map<string, RoutineProposalClosed>();
+    for (const event of events ?? []) {
+      if (event.type === 'routine.proposal.closed') {
+        const data = event.data as RoutineProposalClosed;
+        map.set(data.id, data);
+      }
+    }
+    return map;
+  }, [events]);
   const openRequests = useMemo(
     () => new Map(app.requests.map((request) => [request.id, Boolean(request.held)] as const)),
     [app.requests],
@@ -279,7 +304,17 @@ export function Conversation({ bot }: { bot: BotView }) {
         {!viewing && !conversation ? (
           <p className="muted pad">Loading…</p>
         ) : events && events.length > 0 ? (
-          events.map((event) => <ThreadItem key={event.seq} event={event} closed={closed} openRequests={openRequests} />)
+          events.map((event) => (
+            <ThreadItem
+              key={event.seq}
+              event={event}
+              closed={closed}
+              openRequests={openRequests}
+              proposals={proposals}
+              botId={bot.id}
+              readOnly={Boolean(viewing)}
+            />
+          ))
         ) : (
           <EmptyState bot={bot} />
         )}

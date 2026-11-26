@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { Routine, RoutineInput, RoutineSchedule } from '../../../../shared/types.ts';
+import type { Routine, RoutineInput, RoutineProposal, RoutineProposalClosed, RoutineSchedule } from '../../../../shared/types.ts';
 import { api } from '../api.ts';
 import { ago, describeSchedule, until, when } from '../format.ts';
 import { useAppState } from '../state.ts';
@@ -301,6 +301,80 @@ export function RoutinesDialog({ botId }: { botId: string | null }) {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * A routine a bot proposed in its conversation (thread event routine.proposed). It exists only
+ * once the user clicks Create; bots cannot create routines themselves.
+ */
+export function RoutineProposalCard({
+  botId,
+  proposal,
+  closed,
+  readOnly,
+}: {
+  /** The bot whose conversation shows the card. */
+  botId: string;
+  proposal: RoutineProposal;
+  closed: RoutineProposalClosed | undefined;
+  /** An earlier conversation: the card can no longer be answered. */
+  readOnly: boolean;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const waiting = !closed && !readOnly;
+
+  const act = async (create: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      if (create) await api.acceptRoutineProposal(botId, proposal.id);
+      else await api.dismissRoutineProposal(botId, proposal.id);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className={`request-card${waiting ? '' : ' closed'}`} data-kind="routine" data-testid="routine-proposal">
+      <div className="request-head">
+        <span className="request-kind">Routine to create</span>
+        <span className="request-from">
+          {proposal.title} · to {proposal.botName}
+        </span>
+      </div>
+      <p className="request-what">
+        {describeSchedule(proposal.schedule)}
+        {waiting && <span className="muted"> · first run {when(proposal.nextRunAt)}</span>}
+      </p>
+      <pre className="request-input">{proposal.prompt}</pre>
+      {error && (
+        <p className="request-error" role="alert">
+          {error}
+        </p>
+      )}
+      {waiting ? (
+        <div className="request-actions">
+          <button type="button" className="primary" disabled={busy} onClick={() => void act(true)}>
+            {busy ? 'Creating…' : 'Create routine'}
+          </button>
+          <button type="button" disabled={busy} onClick={() => void act(false)}>
+            Dismiss
+          </button>
+        </div>
+      ) : (
+        <p className="request-outcome" data-testid="routine-proposal-outcome">
+          {closed?.outcome === 'created'
+            ? 'Created. It is in the Routines list.'
+            : closed?.outcome === 'dismissed'
+              ? 'Dismissed.'
+              : 'Not created (this was an earlier conversation).'}
+        </p>
+      )}
     </div>
   );
 }

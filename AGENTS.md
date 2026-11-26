@@ -66,7 +66,7 @@ and verified:
 |---|---|
 | Core: bot hierarchy and routing, report-back to whoever asked, question relay through the project bot, approvals to the user, sub-agent lifecycle, restart recovery, requests held across a restart, limits, settings, worktrees, archive and retention, earlier conversations, engine checks, validation, canonical folders, read-only git; the Codex engine against a fake app-server | `npm test`: 48 tests with scripted bots, mock sub-agents and a fake Codex app-server, no model usage. Windows: 48 pass. Linux: 47 pass, 1 Windows-only test skipped |
 | Desktop app with scripted models | `npm run e2e`: 14 checks on Windows and on Linux (WSLg): bots, routing, approvals and questions in the right conversation, sub-agent panel, settings, worktree sub-agent with limits and archiving, reading and continuing an earlier conversation, app settings and engine check, no page errors |
-| Desktop app with real models (Claude haiku and a cheap Codex model, low effort) | `npm run live` on Windows, with `CODE_BOT_LIVE_CODEX=1`, 12 steps: sign-in check; main bot → project bot → report (answer from the project's `CLAUDE.md`); a sub-agent writes a file after an approval; a sub-agent in its own worktree commits on its branch while the project folder stays untouched, and the project bot names the branch; the sub-agent ran on the configured model; a sub-agent calls a local MCP server from the project's settings without an approval (allowed); a project bot with Codex sub-agents: a Codex sub-agent creates a file after an approval, a follow-up from the project bot continues the same Codex session, and a Codex sub-agent calls the MCP server after an approval |
+| Desktop app with real models (Claude haiku and a cheap Codex model, low effort) | `npm run live` on Windows: 10 steps with Claude, 14 with `CODE_BOT_LIVE_CODEX=1` (the Codex steps last ran on 2026-11-26 with the MCP servers change): sign-in check; main bot → project bot → report (answer from the project's `CLAUDE.md`); a sub-agent writes a file after an approval; a sub-agent in its own worktree commits on its branch while the project folder stays untouched, and the project bot names the branch; the sub-agent ran on the configured model; the user merges that branch into the project folder from its panel; a sub-agent calls a local MCP server from the project's settings without an approval (allowed); asked in plain words, the main bot proposes a weekday 09:00 routine that exists only after the card's Create; a project bot with Codex sub-agents: a Codex sub-agent creates a file after an approval, a follow-up from the project bot continues the same Codex session, and a Codex sub-agent calls the MCP server after an approval |
 | `auto` permission mode | `scripts/auto-mode-check.ts` (haiku, on the owner's Claude subscription): a file write and two commands ran without approval requests (decision 25) |
 | Codex engine | Through the app (above), and `scripts/codex-check.ts` against real Codex 0.160.1 (ChatGPT login, cheap model): a file created after an approval, a resumed thread that remembers it, a question relayed through `askUser` and answered; `test/codex.test.ts` (12 tests) against a fake app-server |
 | Open in terminal | The launcher (`src/desktop/main/terminal.ts`) starts a detached program in the given folder on Windows; the interactive Claude/Codex session it opens was not driven by a test |
@@ -74,6 +74,7 @@ and verified:
 | Releases | `.github/workflows/release.yml` published v0.3.0 (2026-11-17), v0.3.1 (2026-11-18) and v0.4.0 (2026-11-26) from their tags: Windows installer and portable zip, Linux AppImage and deb, built and tested on GitHub's runners, with SHA-256 digests the update button checks, https://github.com/kggayo/code-bot/releases |
 | Desk improvements (0.4.0, 2026-11-26): one developer per piece of work (roles, `for_subagent`, permission changes, recent sub-agents in each message), plan limits and costs, routines, resizable panes, activity indicators, readable approvals, answered cards, taskbar badge, update button, sharper icon | `npm test`: 56 tests on Windows, and on Windows and Linux in CI (`test/work.test.ts` covers roles, follow-ups, permissions, usage, limit parsing, schedules and routine runs). `npm run e2e`: 17 checks on Windows, and on Windows and Linux in CI, in a 1024x768 window like GitHub's runners and in the smallest window (approval as a command, main bot's project-bot panel and activity strip, answered card, working sub-agent strip, routines, resizing, plan limits, Updates section). `npm run live` (Claude haiku, 7 steps) and `scripts/packaged-check.ts` pass on Windows. The plan-limit calls were tried against real Claude Code (Max) and Codex 0.160.1 by hand. Not verified: installing an update (needs a release newer than 0.4.0), the taskbar badge and flashing (native). |
 | MCP servers per project (branch `feature/project-mcp-servers`, 2026-11-26): added in a project bot's settings, passed to its sub-agents at every run (decision 32) | `npm test`: 62 tests on Windows (`test/mcp.test.ts`: checking, the Windows launch rule, Claude and Codex options, command lines, saved and passed at every turn, the project bot's prompt). `npm run e2e`: 18 checks on Windows (add a server, a broken address refused with the reason, kept on reopening, a sub-agent receives it). `npm run live` (above): Claude Code and Codex sub-agents call a local MCP server from the settings. Both agents start a server through `cmd /c` (checked by hand against Codex 0.160.1 and Agent SDK 0.3.325). Not verified: Linux, an HTTP server, `npx @playwright/mcp` itself. |
+| Finishing Milestone 1 (branch `feature/finish-milestone-1`, 2026-11-26): merge or push a sub-agent's branch from its panel (decision 33), routines proposed by bots and created by the user (decision 34), the AppImage updating itself (decision 35), MCP tokens from a named environment variable (decision 32) | `npm test`: 71 tests on Windows and in WSL (`test/branches.test.ts` with real git repositories: status, a refused merge on a dirty folder, a merge, a conflict left undone, a push to a bare remote, archiving while a check runs, GitHub remote forms; `test/proposals.test.ts`: proposing, creating once, dismissing, refused schedules, earlier conversations; token names and mapping in `test/mcp.test.ts`). `npm run e2e`: 20 checks on Windows (merge and push from the panel, a proposed routine created from its card). `npm run live` (above): a real sub-agent's branch merged from its panel, and a routine proposed by the main bot from a plain request. In WSL (Ubuntu 24.04): `npm test` (1 Windows-only test skipped), `npm run package:linux` and `scripts/appimage-update-check.ts`: the built AppImage finds a newer release served from localhost, replaces itself and restarts. Tokens checked by hand: Claude Code (Agent SDK 0.3.325) and Codex 0.160.1 reach a local HTTP MCP server that only answers the token from the named variable. Not verified: opening a real pull request with gh (pushing was), an update from a real release. |
 | CI on GitHub | `.github/workflows/build.yml` on `windows-latest` and `ubuntu-latest` (under a virtual display): typecheck, tests, end-to-end and installers, uploaded as artifacts. Passed on both for the first push to `main` (2026-11-17) and for pull request 1 (0.4.0, 2026-11-26), https://github.com/kggayo/code-bot/actions |
 | Linux AppImage and deb | Built in WSL with `npm run package:linux`; `scripts/packaged-check.ts` against `release/linux-unpacked`: starts and its sign-in check runs the unpacked Claude Code. The model turn was skipped: Claude Code in WSL was not signed in (its April login had expired) |
 
@@ -99,6 +100,7 @@ npm run package      # installer for the current platform into release/
 npx electron-builder --dir --publish never && node scripts/packaged-check.ts   # quick check of a packaged build
 node scripts/codex-check.ts          # the Codex engine against real Codex (uses Codex usage)
 node scripts/auto-mode-check.ts      # Claude Code "auto" permissions on this login (uses model usage)
+node scripts/appimage-update-check.ts # Linux, after npm run package:linux: the AppImage updates itself and restarts
 npx electron scripts/make-icons.mjs  # regenerate build/ icons from build/icon.svg and build/icon-small.svg
 ```
 
@@ -142,6 +144,7 @@ Environment variables (read by `src/desktop/main/index.ts` and the engines):
 | `CODE_BOT_CODEX_EXECUTABLE` | Use this Codex binary instead of `codex` on the PATH. |
 | `CODE_BOT_NO_QUIT_PROMPT=1` | Quit without asking even while sub-agents work (tests). |
 | `CODE_BOT_NO_UPDATE_CHECK=1` | Never look for a newer release by itself (demo mode never does either). |
+| `CODE_BOT_UPDATE_FEED` | Ask this localhost address for the newest release instead of GitHub (`scripts/appimage-update-check.ts`); ignored unless it is `http://127.0.0.1` or `http://localhost`. |
 
 Claude Code must be signed in on the machine for real use. The app checks on
 start-up and shows a banner with a Sign in button (it opens a terminal running
@@ -176,7 +179,7 @@ file). A failed run leaves no release: fix, move the tag
 
 | Path | What |
 |---|---|
-| `src/core/` | The orchestrator. No Electron imports: it must stay runnable headless. Start with `code-bot.ts`; `tasks.ts` runs sub-agents, `worktrees.ts` their git worktrees, `routines.ts` routine schedules, `mcp.ts` a project's MCP servers, `engines/` the coding agents (`claude.ts`, `codex.ts`, `mock.ts`). |
+| `src/core/` | The orchestrator. No Electron imports: it must stay runnable headless. Start with `code-bot.ts`; `tasks.ts` runs sub-agents, `worktrees.ts` their git worktrees, `routines.ts` routine schedules, `mcp.ts` a project's MCP servers, `branches.ts` merging or pushing a sub-agent's branch, `engines/` the coding agents (`claude.ts`, `codex.ts`, `mock.ts`). |
 | `src/shared/types.ts` | Every type shared by core, main, preload and renderer, including `CodeBotApi` and the event shapes. |
 | `src/desktop/main/` | Electron main process: window, IPC (`ipc.ts`), terminals (`terminal.ts`), the taskbar badge (`badge.ts`), updates (`updates.ts`), quit handling. |
 | `src/desktop/preload/` | The `window.codeBot` bridge. |
@@ -187,6 +190,7 @@ file). A failed run leaves no release: fix, move the tag
 | `scripts/codex-check.ts`, `scripts/auto-mode-check.ts` | Live checks of the Codex engine and of Claude Code's `auto` mode. |
 | `scripts/make-icons.mjs`, `build/` | The app icon: `build/icon.svg`, `build/icon-small.svg` (16-32 px) and the PNG/ICO files made from them. |
 | `scripts/wsl-sync.sh` | Copies the checkout into WSL for Linux builds and checks. |
+| `scripts/appimage-update-check.ts` | On Linux: a copy of the built AppImage updates itself from a made-up release served from localhost, and restarts. |
 | `.github/workflows/build.yml` | CI for Windows and Linux on every push to `main` and every pull request: typecheck, tests, end-to-end, installers (as artifacts). |
 | `.github/workflows/release.yml`, `.github/release-notes.md` | Publishes a GitHub release with the installers when a version tag is pushed; the notes file is the release text. |
 | `docs/architecture.md` | Components, the three levels, routing rules, lifecycle, security model. |
@@ -308,6 +312,17 @@ file). A failed run leaves no release: fix, move the tag
   `cmd.exe /d /c` (`launchCommand` in `src/core/mcp.ts`). `allowedTools` rules
   bypass `canUseTool`, so an allowed server's tools never reach code-bot's
   approval flow; plan mode never allows them.
+- **Bots' tool lists are pinned in a test** (`test/bots.test.ts`): a new bot
+  tool updates that list on purpose.
+- **Routine proposals are thread events**, not rows: `acceptRoutineProposal`
+  looks the id up in the bot's current conversation. A bot proposes; only the
+  user's click creates a routine.
+- **Merging and pushing a sub-agent's branch run on the user's click only**
+  (`src/core/branches.ts`), with prompts off. Tests set `ghExecutable: null` in
+  `test/helpers.ts` so the machine's gh never runs; git repositories in tests
+  set `core.autocrlf false` so files read back as written on Windows. Git work
+  in one worktree runs one piece at a time (`CodeBot.oneAtATime`): Windows
+  cannot remove a folder while the window's git status runs in it.
 - **Dialog fieldsets need `min-width: 0`** (already in `styles.css`): by
   default a fieldset is as wide as its widest content, and a long folder path
   pushed the settings dialog sideways.

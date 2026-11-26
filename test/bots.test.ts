@@ -198,6 +198,9 @@ test("a project bot can only reach its own sub-agents, and cannot approve action
       'answer_subagent',
       'cancel_subagent',
       'git',
+      // Seeing routines, and proposing one that the user creates; neither changes anything.
+      'list_routines',
+      'propose_routine',
     ]);
     await attempt('read other', () => tools.call('get_subagent', { id: alphaTask.id }));
     await attempt('stop other', () => tools.call('cancel_subagent', { id: alphaTask.id }));

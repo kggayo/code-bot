@@ -136,9 +136,14 @@ export function claudeMcpOptions(
   if (!servers?.length) return {};
   const mcpServers: NonNullable<Options['mcpServers']> = {};
   for (const server of servers) {
+    // Claude Code fills in ${NAME} from its own environment, so the token never passes through code-bot.
     mcpServers[server.name] =
       server.type === 'http'
-        ? { type: 'http', url: server.url }
+        ? {
+            type: 'http',
+            url: server.url,
+            ...(server.tokenEnvVar ? { headers: { Authorization: `Bearer \${${server.tokenEnvVar}}` } } : {}),
+          }
         : { type: 'stdio', ...launchCommand(server.command, server.args, platform) };
   }
   const allowed = allowedServers(servers, permissionMode).map((server) => `mcp__${server.name}`);

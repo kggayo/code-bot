@@ -54,14 +54,19 @@ interface ServerRow {
   key: number;
   name: string;
   line: string;
+  /** For an address: the environment variable holding its token (the name only). */
+  tokenEnvVar: string;
   allowTools: boolean;
 }
+
+const isAddress = (line: string) => /^https?:\/\//i.test(line.trim());
 
 function toRows(servers: McpServer[]): ServerRow[] {
   return servers.map((server, index) => ({
     key: index,
     name: server.name,
     line: server.type === 'http' ? server.url : joinCommandLine([server.command, ...server.args]),
+    tokenEnvVar: server.type === 'http' ? (server.tokenEnvVar ?? '') : '',
     allowTools: server.allowTools,
   }));
 }
@@ -73,7 +78,7 @@ function fromRows(rows: ServerRow[]): McpServer[] {
     .map((row): McpServer => {
       const name = row.name.trim();
       const line = row.line.trim();
-      if (/^https?:\/\//i.test(line)) return { type: 'http', name, url: line, allowTools: row.allowTools };
+      if (isAddress(line)) return { type: 'http', name, url: line, tokenEnvVar: row.tokenEnvVar.trim() || null, allowTools: row.allowTools };
       const [command = '', ...args] = splitCommandLine(line);
       return { type: 'stdio', name, command, args, allowTools: row.allowTools };
     });
@@ -110,6 +115,16 @@ function McpServersField({ rows, onChange }: { rows: ServerRow[]; onChange: (row
           <button type="button" className="link" onClick={() => onChange(rows.filter((item) => item.key !== row.key))}>
             Remove
           </button>
+          {isAddress(row.line) && (
+            <input
+              name="mcpTokenEnv"
+              aria-label="Token from environment variable"
+              placeholder="Token from environment variable (optional), for example DOCS_MCP_TOKEN"
+              maxLength={100}
+              value={row.tokenEnvVar}
+              onChange={(event) => update(row.key, { tokenEnvVar: event.target.value })}
+            />
+          )}
           <label className="check">
             <input
               type="checkbox"
@@ -124,14 +139,14 @@ function McpServersField({ rows, onChange }: { rows: ServerRow[]; onChange: (row
       <div>
         <button
           type="button"
-          onClick={() => onChange([...rows, { key: nextKey.current++, name: '', line: '', allowTools: false }])}
+          onClick={() => onChange([...rows, { key: nextKey.current++, name: '', line: '', tokenEnvVar: '', allowTools: false }])}
         >
           + Add MCP server
         </button>
       </div>
       <small>
-        No keys or tokens here: a server that needs one reads it from the environment code-bot runs in. Changes apply from each
-        sub-agent's next turn.
+        No keys or tokens here. A command reads what it needs from the environment code-bot runs in; for an address, name the
+        environment variable that holds its token and the agent reads it from there. Changes apply from each sub-agent's next turn.
       </small>
     </fieldset>
   );

@@ -79,6 +79,7 @@ export function setup(t: TestContext, options: { questionTimeoutMs?: number } = 
     retentionIntervalMs: 0,
     usageIntervalMs: 0,
     routineTickMs: 0,
+    ghExecutable: null,
   });
   const events: CoreEvent[] = [];
   core.subscribe((event) => events.push(event));

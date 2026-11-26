@@ -4,7 +4,7 @@
 //   node scripts/e2e.ts
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +18,12 @@ mkdirSync(projectDir, { recursive: true });
 // A git repository, so sub-agents can also get their own worktrees.
 const git = (...args: string[]) =>
   execFileSync('git', ['-c', 'user.email=e2e@example.com', '-c', 'user.name=code-bot e2e', ...args], { cwd: projectDir, stdio: 'ignore' });
+const gitIn = (cwd: string, ...args: string[]) =>
+  execFileSync('git', ['-c', 'user.email=e2e@example.com', '-c', 'user.name=code-bot e2e', ...args], {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
 git('init', '-q', '-b', 'main');
 writeFileSync(join(projectDir, 'README.md'), '# demo\n');
 git('add', '.');
@@ -236,6 +242,36 @@ try {
     await conversation.getByText(/finished: echo\[dev-model\/high mcp:playwright\]: open the browser/).waitFor();
   });
 
+  await check("a finished sub-agent's branch is merged into the project folder, and pushed", async () => {
+    // A remote to push to, and a commit on the sub-agent's branch (mock sub-agents change nothing).
+    const remote = join(userData, 'remote.git');
+    mkdirSync(remote);
+    gitIn(remote, 'init', '-q', '--bare');
+    git('remote', 'add', 'origin', remote);
+    await panel.getByTestId('subagent-item').filter({ hasText: 'open the browser' }).click();
+    const worktree = await panel.getByTestId('worktree-info').getByRole('button', { name: 'open worktree' }).getAttribute('title');
+    assert.ok(worktree);
+    writeFileSync(join(worktree, 'browser.md'), 'opened\n');
+    gitIn(worktree, 'add', 'browser.md');
+    gitIn(worktree, 'commit', '-q', '-m', 'Open the browser');
+    // Open it again so it looks at the branch afresh.
+    await panel.getByRole('button', { name: '← Sub-agents' }).click();
+    await panel.getByTestId('subagent-item').filter({ hasText: 'open the browser' }).click();
+    const actions = panel.getByTestId('branch-actions');
+    await actions.getByText('1 commit not yet in main').waitFor();
+    await actions.getByRole('button', { name: 'Merge into main' }).click();
+    await actions.getByText(/^Merge 1 commit from code-bot\/t_[0-9a-f]{10}-open-the-browser into main/).waitFor();
+    await actions.getByRole('button', { name: 'Merge', exact: true }).click();
+    await actions.getByTestId('branch-merged').getByText(/^Merged into main \([0-9a-f]{7}\)$/).waitFor();
+    assert.ok(existsSync(join(projectDir, 'browser.md')), 'the merge did not reach the project folder');
+    await actions.getByRole('button', { name: 'Push branch' }).click();
+    await actions.getByRole('button', { name: 'Push', exact: true }).click();
+    await actions.getByTestId('branch-pushed').getByText('Pushed to origin').waitFor();
+    assert.match(gitIn(remote, 'branch', '--list', 'code-bot/*'), /code-bot\/t_[0-9a-f]{10}-open-the-browser/);
+    if (shots) await page.screenshot({ path: join(shots, '3c-branch.png') });
+    await panel.getByRole('button', { name: '← Sub-agents' }).click();
+  });
+
   await check('an earlier conversation can be read and continued', async () => {
     await page.getByRole('button', { name: 'New conversation' }).click();
     await conversation.locator('.divider', { hasText: 'New conversation' }).waitFor();
@@ -289,6 +325,21 @@ try {
     await dialog.waitFor({ state: 'detached' });
     await conversation.getByTestId('routine-run').getByText('check the build').waitFor();
     await conversation.getByText(/echo: \[routine "Morning check"/).waitFor();
+  });
+
+  await check('a routine asked for in the conversation is proposed on a card and created with one click', async () => {
+    await say(page, 'every 30 minutes: run the smoke tests');
+    const card = conversation.getByTestId('routine-proposal').last();
+    await card.getByText('Routine to create').waitFor();
+    await card.getByText('Every 30 minutes').waitFor();
+    // Proposed, not created.
+    assert.equal(await page.getByTestId('bot-routines').textContent(), 'Routines (1)');
+    await card.scrollIntoViewIfNeeded();
+    if (shots) await page.screenshot({ path: join(shots, '7b-routine-proposal.png') });
+    await card.getByRole('button', { name: 'Create routine' }).click();
+    await card.getByTestId('routine-proposal-outcome').getByText('Created. It is in the Routines list.').waitFor();
+    await page.getByTestId('upcoming-routines').getByText('run the smoke tests').waitFor();
+    assert.equal(await page.getByTestId('bot-routines').textContent(), 'Routines (2)');
   });
 
   await check('the panes can be resized, give way in a narrow window, and the plan limits are shown', async () => {

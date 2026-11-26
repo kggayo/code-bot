@@ -9,7 +9,7 @@ import type { McpServer } from '../src/shared/types.ts';
 import { idle, mockSubagents, setup, waitFor } from './helpers.ts';
 
 const playwright: McpServer = { type: 'stdio', name: 'playwright', command: 'npx', args: ['@playwright/mcp@latest'], allowTools: true };
-const docs: McpServer = { type: 'http', name: 'docs', url: 'https://docs.example.com/mcp', allowTools: false };
+const docs: McpServer = { type: 'http', name: 'docs', url: 'https://docs.example.com/mcp', tokenEnvVar: 'DOCS_MCP_TOKEN', allowTools: false };
 
 test('MCP servers in bot settings are checked and tidied', () => {
   assert.deepEqual(cleanMcpServers(undefined), []);
@@ -20,9 +20,11 @@ test('MCP servers in bot settings are checked and tidied', () => {
     ]),
     [
       { type: 'stdio', name: 'playwright', command: 'npx', args: ['@playwright/mcp@latest'], allowTools: true },
-      { type: 'http', name: 'docs', url: 'https://docs.example.com/mcp', allowTools: false },
+      { type: 'http', name: 'docs', url: 'https://docs.example.com/mcp', tokenEnvVar: null, allowTools: false },
     ],
   );
+  const [cleaned] = cleanMcpServers([{ ...docs, tokenEnvVar: ' DOCS_MCP_TOKEN ' }]);
+  assert.equal(cleaned?.type === 'http' ? cleaned.tokenEnvVar : undefined, 'DOCS_MCP_TOKEN');
   const refused = (value: unknown, pattern: RegExp) => assert.throws(() => cleanMcpServers(value), pattern);
   refused('playwright', /must be a list/);
   refused([{ type: 'stdio', name: '', command: 'x', args: [] }], /Give each MCP server a name/);
@@ -40,6 +42,9 @@ test('MCP servers in bot settings are checked and tidied', () => {
   refused([{ type: 'http', name: 'x', url: 'docs.example.com/mcp' }], /needs a full address/);
   refused([{ type: 'http', name: 'x', url: 'ftp://docs.example.com' }], /http:\/\/ or https:\/\//);
   refused([{ type: 'http', name: 'x', url: 'https://me:secret@docs.example.com' }], /does not keep credentials/);
+  // A token pasted where its variable's name belongs is refused, not stored.
+  refused([{ type: 'http', name: 'x', url: 'https://x.example', tokenEnvVar: 'ghp_a1b2-c3d4' }], /not an environment variable name/);
+  refused([{ type: 'http', name: 'x', url: 'https://x.example', tokenEnvVar: '1TOKEN' }], /not an environment variable name/);
   refused([{ name: 'x', command: 'npx' }], /a command or an address/);
   refused(
     Array.from({ length: MAX_MCP_SERVERS + 1 }, (_, i) => ({ type: 'stdio', name: `s${i}`, command: 'x', args: [] })),
@@ -63,7 +68,8 @@ test('Claude Code sub-agents get the servers as SDK options, and allowed servers
   assert.deepEqual(claudeMcpOptions([playwright, docs], 'acceptEdits', 'linux'), {
     mcpServers: {
       playwright: { type: 'stdio', command: 'npx', args: ['@playwright/mcp@latest'] },
-      docs: { type: 'http', url: 'https://docs.example.com/mcp' },
+      // Claude Code fills in the token from its own environment.
+      docs: { type: 'http', url: 'https://docs.example.com/mcp', headers: { Authorization: 'Bearer ${DOCS_MCP_TOKEN}' } },
     },
     allowedTools: ['mcp__playwright'],
   });
@@ -79,7 +85,7 @@ test('Codex sub-agents get one config override per server, added to their own se
   assert.deepEqual(codexMcpConfig(undefined, 'acceptEdits'), {});
   assert.deepEqual(codexMcpConfig([playwright, docs], 'acceptEdits', 'linux'), {
     'mcp_servers.playwright': { command: 'npx', args: ['@playwright/mcp@latest'], default_tools_approval_mode: 'approve' },
-    'mcp_servers.docs': { url: 'https://docs.example.com/mcp', default_tools_approval_mode: 'prompt' },
+    'mcp_servers.docs': { url: 'https://docs.example.com/mcp', bearer_token_env_var: 'DOCS_MCP_TOKEN', default_tools_approval_mode: 'prompt' },
   });
   assert.deepEqual(codexMcpConfig([playwright], 'plan', 'win32'), {
     'mcp_servers.playwright': {

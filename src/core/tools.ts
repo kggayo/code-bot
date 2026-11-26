@@ -1,6 +1,19 @@
 import { z } from 'zod';
 import { EFFORTS, PERMISSION_MODES, SUBAGENT_ROLES } from '../shared/types.ts';
-import type { Bot, BotView, Effort, PermissionMode, Requester, SubagentRole, Task, UserResponse } from '../shared/types.ts';
+import type {
+  Bot,
+  BotView,
+  Effort,
+  PermissionMode,
+  Requester,
+  Routine,
+  RoutineInput,
+  RoutineProposal,
+  RoutineSchedule,
+  SubagentRole,
+  Task,
+  UserResponse,
+} from '../shared/types.ts';
 import type { BotTool } from './brain.ts';
 import { GIT_SUBCOMMANDS, runGit } from './git.ts';
 import type { TaskManager } from './tasks.ts';
@@ -35,6 +48,111 @@ export interface ToolHost {
   matchFolder(bot: Bot, folder: string): string;
   /** A project folder or one of the project's sub-agent worktrees. */
   matchGitFolder(bot: Bot, folder: string): string;
+  listRoutines(): Routine[];
+  /** Shows a routine for the user to create, as a card in `from`'s conversation. Creates nothing. */
+  proposeRoutine(from: Bot, input: Omit<RoutineInput, 'enabled'>): RoutineProposal;
+}
+
+const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
+
+/** "Thu 27 Nov 2026, 09:00" in the computer's local time, for bots that plan around it. */
+function localTime(iso: string | Date): string {
+  return new Date(iso).toLocaleString('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function scheduleWords(schedule: RoutineSchedule): string {
+  switch (schedule.kind) {
+    case 'once':
+      return `once, ${localTime(schedule.at)}`;
+    case 'daily':
+      return `at ${schedule.time} on ${schedule.days.map((day) => DAY_NAMES[day]).join(', ')}`;
+    case 'interval':
+      return `every ${schedule.minutes} minutes`;
+  }
+}
+
+/** The routine tools both kinds of bot have: see what is scheduled, and propose a routine for the user to create. */
+function routineTools(host: ToolHost, from: Bot, targetOf: (args: Record<string, unknown>) => Bot): BotTool[] {
+  return [
+    {
+      name: 'list_routines',
+      description:
+        from.kind === 'main'
+          ? "List the routines: messages code-bot sends to a bot on a schedule (yours and the project bots'), with the computer's local time now."
+          : "List this project's routines: messages code-bot sends you on a schedule, with the computer's local time now.",
+      schema: {},
+      readOnly: true,
+      run: () => ({
+        now: localTime(new Date()),
+        routines: host
+          .listRoutines()
+          .filter((routine) => from.kind === 'main' || routine.botId === from.id)
+          .map((routine) => ({
+            title: routine.title,
+            bot: host.projectBots().find((bot) => bot.id === routine.botId)?.name ?? 'main bot',
+            message: clip(routine.prompt, 300),
+            schedule: scheduleWords(routine.schedule),
+            enabled: routine.enabled,
+            next_run: routine.nextRunAt ? localTime(routine.nextRunAt) : null,
+          })),
+      }),
+    },
+    {
+      name: 'propose_routine',
+      description: [
+        'When the user asks for something to happen on a schedule ("every weekday at 9 …", "every 2 hours …", "tomorrow at 15:00 …"), propose a routine.',
+        `It is not created by this tool: the user sees it as a card in this conversation and creates it with one click (or dismisses it). Say so in your reply.`,
+        "Times are the computer's local time. Each time it comes due, the message is sent to the bot as if the user typed it, so write it complete and self-contained.",
+      ].join(' '),
+      schema: {
+        ...(from.kind === 'main'
+          ? { bot: z.string().optional().describe('The project bot the message goes to; leave out for yourself (the main bot)') }
+          : {}),
+        title: z.string().describe('A short name, for example "Morning check of open PRs"'),
+        message: z.string().describe('What the bot is asked each time, complete on its own'),
+        kind: z.enum(['daily', 'interval', 'once']).describe('daily: at a time on chosen days; interval: every N minutes; once: at one date and time'),
+        time: z.string().optional().describe('daily: the time of day, HH:MM (24-hour)'),
+        days: z.array(z.enum(DAY_NAMES)).optional().describe('daily: the days, for example ["mon","tue","wed","thu","fri"]; all seven for every day'),
+        minutes: z.number().int().optional().describe('interval: minutes between runs, from 15 to 10080 (a week)'),
+        at: z.string().optional().describe('once: local date and time, YYYY-MM-DDTHH:MM, for example 2026-11-27T15:00'),
+      },
+      run: (args) => {
+        const target = targetOf(args);
+        const kind = String(args.kind);
+        const schedule =
+          kind === 'daily'
+            ? {
+                kind: 'daily' as const,
+                time: String(args.time ?? ''),
+                days: (Array.isArray(args.days) ? args.days : []).map((day) => DAY_NAMES.indexOf(String(day) as (typeof DAY_NAMES)[number])),
+              }
+            : kind === 'interval'
+              ? { kind: 'interval' as const, minutes: Number(args.minutes) }
+              : { kind: 'once' as const, at: String(args.at ?? '') };
+        const proposal = host.proposeRoutine(from, {
+          botId: target.id,
+          title: String(args.title ?? ''),
+          prompt: String(args.message ?? ''),
+          schedule,
+        });
+        return {
+          proposed: proposal.title,
+          for_bot: proposal.botName,
+          schedule: scheduleWords(proposal.schedule),
+          first_run: localTime(proposal.nextRunAt),
+          now: localTime(new Date()),
+          note: 'Not created yet: the user creates it with the card in this conversation.',
+        };
+      },
+    },
+  ];
 }
 
 const optionalText = (value: unknown): string | undefined =>
@@ -59,7 +177,7 @@ function summary(task: Task, tasks: TaskManager) {
 }
 
 /** The main bot's tools: it routes work to project bots and never touches sub-agents directly. */
-export function mainBotTools(host: ToolHost): BotTool[] {
+export function mainBotTools(host: ToolHost, main: Bot): BotTool[] {
   return [
     {
       name: 'list_project_bots',
@@ -108,6 +226,7 @@ export function mainBotTools(host: ToolHost): BotTool[] {
         };
       },
     },
+    ...routineTools(host, main, (args) => (optionalText(args.bot) ? host.findProjectBot(String(args.bot)) : main)),
   ];
 }
 
@@ -291,5 +410,6 @@ export function projectBotTools(host: ToolHost, bot: Bot, requester: () => Reque
         return runGit(cwd, (args.args as string[]).map(String));
       },
     },
+    ...routineTools(host, bot, () => bot),
   ];
 }

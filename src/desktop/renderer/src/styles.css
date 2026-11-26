@@ -772,6 +772,32 @@ body.resizing {
   padding: 0;
   font-size: 12px;
 }
+/* A stopped sub-agent's branch: merge it, or push it and open a pull request. */
+.branch-actions {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+.branch-actions .choices,
+.branch-actions .confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  overflow-wrap: anywhere;
+}
+.branch-actions button {
+  font-size: 12px;
+  padding: 3px 9px;
+}
+.branch-actions .link {
+  justify-self: start;
+  padding: 0;
+}
+.branch-actions .done {
+  color: var(--done);
+  font-weight: 600;
+}
 .panel .composer {
   padding: 8px 10px;
 }
@@ -882,9 +908,14 @@ body.resizing {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 12px;
 }
-.dialog .mcp-row label.check {
+.dialog .mcp-row label.check,
+.mcp-row input[name='mcpTokenEnv'] {
   grid-column: 1 / -1;
   white-space: normal;
+}
+.mcp-row input[name='mcpTokenEnv'] {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
 }
 .mcp-servers p {
   margin: 0;

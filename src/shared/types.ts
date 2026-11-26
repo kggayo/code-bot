@@ -66,6 +66,12 @@ export interface McpStdioServer extends McpServerBase {
 export interface McpHttpServer extends McpServerBase {
   type: 'http';
   url: string;
+  /**
+   * The name of an environment variable holding the server's token, sent as "Authorization:
+   * Bearer <token>". code-bot passes only the name: the agent reads the value from the environment
+   * code-bot runs in. null or missing: no token.
+   */
+  tokenEnvVar?: string | null;
 }
 
 /** Defaults for the sub-agents a project bot starts. */
@@ -178,6 +184,40 @@ export interface TaskWorktree {
   folder: string;
   /** The worktree folder was removed (the branch may remain). */
   removed: boolean;
+  /** Set when the user merged the branch into the project folder from the window. */
+  merged?: { into: string; commit: string; at: string };
+  /** Set when the user pushed the branch (and opened a pull request) from the window. url: the pull request, or GitHub's page to create one. */
+  pullRequest?: { remote: string; url: string | null; created: boolean; at: string };
+}
+
+/**
+ * What the user can do with a stopped sub-agent's worktree branch: merge it into the project
+ * folder, or push it and open a pull request (getBranchStatus).
+ */
+export interface BranchStatus {
+  taskId: string;
+  branch: string;
+  /** The project folder, and the branch it is on now (null when detached). */
+  folder: string;
+  folderBranch: string | null;
+  /** Commits on the sub-agent's branch that the project folder's branch does not have yet. */
+  ahead: number;
+  /** The project folder has uncommitted changes; merging waits until they are committed or stashed. */
+  folderDirty: boolean;
+  /** The sub-agent left uncommitted changes in its worktree; they are not part of its branch. */
+  worktreeDirty: boolean;
+  /** Where "push" goes; null when the repository has no remote. */
+  remote: string | null;
+  /** The remote is on GitHub ("owner/repo"), so a pull request can be opened. */
+  githubRepo: string | null;
+  /** gh, GitHub's command-line tool, is installed; without it the window opens GitHub's page to create the pull request. */
+  gh: boolean;
+  /** Why the merge button cannot be used now, or null. */
+  mergeBlocked: string | null;
+  /** Why the push button cannot be used now, or null. */
+  pushBlocked: string | null;
+  merged: TaskWorktree['merged'] | null;
+  pullRequest: TaskWorktree['pullRequest'] | null;
 }
 
 /** One sub-agent's work: a conversation with one coding agent in a project's folders. */
@@ -441,6 +481,29 @@ export interface RoutineInput {
 
 export type RoutinePatch = Partial<RoutineInput>;
 
+/**
+ * A routine a bot proposed when the user asked for one in its conversation (thread event
+ * `routine.proposed`). It is created only when the user clicks Create on its card.
+ */
+export interface RoutineProposal {
+  id: string;
+  /** The bot the routine sends its message to. */
+  botId: string;
+  botName: string;
+  title: string;
+  prompt: string;
+  schedule: RoutineSchedule;
+  /** When it would first run, as planned when it was proposed. */
+  nextRunAt: string;
+}
+
+/** Thread event `routine.proposal.closed`: the user created the proposed routine or dismissed it. */
+export interface RoutineProposalClosed {
+  id: string;
+  outcome: 'created' | 'dismissed';
+  routineId: string | null;
+}
+
 /** Whether a newer code-bot has been released, and how it can be installed here. */
 export interface UpdateInfo {
   current: string;
@@ -449,9 +512,12 @@ export interface UpdateInfo {
   available: boolean;
   /**
    * installer  code-bot can download the new installer and start it (installed Windows app)
-   * manual     the release page is opened; download and install by hand (portable zip, Linux, macOS, running from source)
+   * appimage   code-bot can download the new AppImage, put it in place of this one and restart (Linux AppImage)
+   * manual     the release page is opened; download and install by hand (portable zip, .deb, macOS, running from source)
    */
-  method: 'installer' | 'manual';
+  method: 'installer' | 'appimage' | 'manual';
+  /** A newer version already put in place (AppImage), which starts when code-bot restarts. */
+  installed: string | null;
   /** Why it is manual here, for people. */
   methodNote: string | null;
   /** The release page. */
@@ -514,6 +580,12 @@ export interface CodeBotApi {
    * worktree; with uncommitted changes there it refuses unless discardChanges.
    */
   setTaskArchived(taskId: string, archived: boolean, options?: { discardChanges?: boolean }): Promise<void>;
+  /** What can be done with a stopped sub-agent's worktree branch. */
+  getBranchStatus(taskId: string): Promise<BranchStatus>;
+  /** Merges a stopped sub-agent's branch into the branch the project folder is on. */
+  mergeBranch(taskId: string): Promise<BranchStatus>;
+  /** Pushes a stopped sub-agent's branch and opens a pull request (with gh), or returns GitHub's page to open one. */
+  openPullRequest(taskId: string): Promise<BranchStatus>;
   listRequests(): Promise<PendingRequest[]>;
   respond(taskId: string, requestId: string, response: UserResponse): Promise<void>;
   /** The coding agents' plan limits, as last checked (checks when never checked). */
@@ -527,6 +599,10 @@ export interface CodeBotApi {
   deleteRoutine(routineId: string): Promise<void>;
   /** Runs a routine now, without changing its schedule. */
   runRoutine(routineId: string): Promise<void>;
+  /** Creates the routine a bot proposed in its current conversation (the card's Create button). */
+  acceptRoutineProposal(botId: string, proposalId: string): Promise<Routine>;
+  /** Closes a bot's routine proposal without creating it. */
+  dismissRoutineProposal(botId: string, proposalId: string): Promise<void>;
   checkFolders(paths: string[]): Promise<FolderCheck[]>;
   /** Desktop only: native folder picker. Empty when cancelled. */
   pickFolders(): Promise<string[]>;

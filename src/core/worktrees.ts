@@ -15,12 +15,13 @@ import { CodeBotError } from './util.ts';
 const GIT_OPTIONS = ['-c', 'core.fsmonitor=false', '-c', 'color.ui=never', '--no-pager'];
 const GIT_TIMEOUT_MS = 120_000;
 
-function git(cwd: string, args: string[]): Promise<string> {
+/** Runs git in a folder; a failure becomes a CodeBotError with git's last lines. Also used by branches.ts. */
+export function git(cwd: string, args: string[], env?: NodeJS.ProcessEnv): Promise<string> {
   return new Promise((resolvePromise, reject) => {
     execFile(
       'git',
       [...GIT_OPTIONS, ...args],
-      { cwd, timeout: GIT_TIMEOUT_MS, windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
+      { cwd, timeout: GIT_TIMEOUT_MS, windowsHide: true, maxBuffer: 8 * 1024 * 1024, env: env ?? process.env },
       (error, stdout, stderr) => {
         if (error) {
           const detail = String(stderr).trim().split(/\r?\n/).slice(-3).join(' ') || error.message;

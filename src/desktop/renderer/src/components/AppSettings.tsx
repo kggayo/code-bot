@@ -96,8 +96,9 @@ function Updates() {
       )}
       {confirm && (
         <p className="held-note">
-          Installing closes code-bot{working ? `; the ${working} sub-agent(s) working now stop and can be resumed afterwards` : ''}. The
-          installer then opens; finish it to start the new version.
+          {update?.method === 'appimage'
+            ? `Updating downloads the new AppImage, puts it in place of this one and restarts code-bot${working ? `; the ${working} sub-agent(s) working now stop and can be resumed afterwards` : ''}.`
+            : `Installing closes code-bot${working ? `; the ${working} sub-agent(s) working now stop and can be resumed afterwards` : ''}. The installer then opens; finish it to start the new version.`}
         </p>
       )}
       <div className="inline-actions">
@@ -105,8 +106,12 @@ function Updates() {
           {busy === 'check' ? 'Checking…' : 'Check for updates'}
         </button>
         {update?.available &&
-          (update.method === 'installer' ? (
-            confirm ? (
+          (update.method === 'installer' || update.method === 'appimage' ? (
+            update.installed === update.latest ? (
+              <button type="button" className="primary" data-testid="install-update" onClick={() => void act('install')} disabled={busy !== null}>
+                Restart into {update.latest}
+              </button>
+            ) : confirm ? (
               <button type="button" className="primary" data-testid="install-update" onClick={() => void act('install')} disabled={busy !== null}>
                 {busy === 'install' ? (downloading ? `Downloading… ${update.downloadPercent}%` : 'Starting…') : `Install ${update.latest} now`}
               </button>

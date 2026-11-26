@@ -20,7 +20,13 @@ const mcpServer = z.discriminatedUnion('type', [
     args: z.array(z.string().max(2000)).max(50),
     allowTools: z.boolean(),
   }),
-  z.object({ type: z.literal('http'), name: z.string().max(40), url: z.string().max(2000), allowTools: z.boolean() }),
+  z.object({
+    type: z.literal('http'),
+    name: z.string().max(40),
+    url: z.string().max(2000),
+    tokenEnvVar: z.string().max(100).nullable().optional(),
+    allowTools: z.boolean(),
+  }),
 ]);
 const subagents = z.object({
   engine: z.string().min(1),
@@ -91,6 +97,9 @@ const ARGS: { [M in CodeBotMethod]: z.ZodType<Parameters<CodeBotApi[M]>> } = {
   sendToTask: z.tuple([id, text]),
   cancelTask: z.tuple([id]),
   setTaskArchived: z.tuple([id, z.boolean(), z.object({ discardChanges: z.boolean().optional() }).optional()]),
+  getBranchStatus: z.tuple([id]),
+  mergeBranch: z.tuple([id]),
+  openPullRequest: z.tuple([id]),
   listRequests: z.tuple([]),
   respond: z.tuple([id, id, userResponse]),
   getUsage: z.tuple([]),
@@ -100,6 +109,8 @@ const ARGS: { [M in CodeBotMethod]: z.ZodType<Parameters<CodeBotApi[M]>> } = {
   updateRoutine: z.tuple([id, routineInput.partial()]),
   deleteRoutine: z.tuple([id]),
   runRoutine: z.tuple([id]),
+  acceptRoutineProposal: z.tuple([id, id]),
+  dismissRoutineProposal: z.tuple([id, id]),
   checkFolders: z.tuple([z.array(text).max(20)]),
   pickFolders: z.tuple([]),
   openExternal: z.tuple([text]),
@@ -156,6 +167,9 @@ export function registerIpc(deps: IpcDeps): void {
     sendToTask: (taskId, message) => core.sendToTask(taskId, message),
     cancelTask: (taskId) => core.cancelTask(taskId),
     setTaskArchived: (taskId, archived, options) => core.setTaskArchived(taskId, archived, options),
+    getBranchStatus: (taskId) => core.getBranchStatus(taskId),
+    mergeBranch: (taskId) => core.mergeBranch(taskId),
+    openPullRequest: (taskId) => core.openPullRequest(taskId),
     listRequests: () => core.listRequests(),
     respond: (taskId, requestId, response) => core.respond(taskId, requestId, response),
     getUsage: () => core.getUsage(),
@@ -165,6 +179,8 @@ export function registerIpc(deps: IpcDeps): void {
     updateRoutine: (routineId, patch) => core.updateRoutine(routineId, patch),
     deleteRoutine: (routineId) => core.deleteRoutine(routineId),
     runRoutine: (routineId) => core.runRoutine(routineId),
+    acceptRoutineProposal: (botId, proposalId) => core.acceptRoutineProposal(botId, proposalId),
+    dismissRoutineProposal: (botId, proposalId) => core.dismissRoutineProposal(botId, proposalId),
     checkFolders: (paths) => core.checkFolders(paths),
     pickFolders: async () => {
       const window = deps.window();

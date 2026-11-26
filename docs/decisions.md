@@ -490,7 +490,7 @@ change code-bot); people set them up in the window.
 installed Windows copy downloads `code-bot-Setup-<version>.exe`, checks the
 size and SHA-256 that GitHub lists for the asset, starts the installer and
 quits. The portable zip, Linux packages, macOS and running from source open the
-release page instead.
+release page instead (the AppImage updates itself since decision 35).
 
 **Rejected:** `electron-updater`: another shipped dependency, and it wants a
 `latest.yml` published with each release and works best with signed
@@ -518,7 +518,12 @@ first.
 
 - **No keys or tokens** (requirement 8): there are no fields for environment
   variables or headers. A server that needs a key reads it from the
-  environment code-bot runs in, which the agents pass on.
+  environment code-bot runs in, which the agents pass on. An HTTP server can
+  name the environment variable holding its bearer token (`tokenEnvVar`,
+  added the same day): Claude Code gets `Authorization: Bearer ${NAME}` and
+  expands it from its own environment, Codex gets `bearer_token_env_var`.
+  Checked with both agents against a local HTTP server that only answers the
+  right token: code-bot never reads the value.
 - **Windows:** `npx` and similar commands are batch files that an agent cannot
   start directly, so everything but an `.exe` or `.com` starts through
   `cmd.exe /d /c`, as Claude Code's own documentation advises.
@@ -536,5 +541,58 @@ keep secrets.
 **Not possible yet:** handing sub-agents the user's claude.ai connectors (the
 ones the Claude desktop app shows). They do not load in SDK sessions, also not
 with `ENABLE_CLAUDEAI_MCP_SERVERS=true`, except, as observed, when the session
-also has a server whose tools are allowed. That is undocumented, so code-bot
-does not rely on it either way.
+also has a stdio server whose tools are allowed (an allowed HTTP server did not
+bring them). That is undocumented, so code-bot does not rely on it either way.
+
+## 33. A sub-agent's branch is handed over by the user's click (2026-11-26)
+
+**Decided:** a stopped sub-agent that worked in its own worktree gets two
+buttons in its panel, each confirmed once more: merge its branch into the
+branch the project folder is on, or push it and open a pull request
+(`src/core/branches.ts`). code-bot runs the git commands itself, like
+worktrees, with the user's own git settings, credentials and gh sign-in, and
+only on the user's click. A merge needs a clean project folder and is aborted
+on a conflict (the error names the files); a push goes to the remote of the
+branch the worktree came from, else `origin`; without gh, GitHub's page to
+create the pull request opens instead.
+
+**Why both:** personal projects without review want the work in the folder at
+once; projects reviewed on GitHub want a pull request so the usual review and
+CI run (the owner chose both, 2026-11-26).
+
+**Rejected:** giving bots a merge or push tool (bots never change things);
+merging with `--no-ff` always (the user's own merge settings apply); keeping a
+half-done merge for the user to resolve (the folder may be in use; the
+sub-agent can merge the other way and resolve it in its worktree).
+
+## 34. Bots propose routines; the user creates them (2026-11-26)
+
+**Decided:** both kinds of bot have `propose_routine` and `list_routines`. A
+proposal is checked like a routine from the window and shown as a card in the
+bot's conversation (thread event `routine.proposed`); the routine exists only
+when the user clicks Create, and Dismiss closes it. This keeps the rule that
+bots change nothing themselves (the owner chose the card, 2026-11-26).
+Proposals live in the conversation's events rather than a table: they belong
+to that conversation, a restart keeps them, and one in an earlier
+conversation can no longer be created.
+
+**Rejected:** letting the bot create the routine directly and the user delete
+it afterwards: a routine sends messages unattended, so it should not exist
+before the user has seen its schedule and message.
+
+## 35. The AppImage updates itself in place (2026-11-26)
+
+**Decided:** when code-bot runs as an AppImage whose folder it may write to
+(`$APPIMAGE`), the update button downloads `code-bot-<version>.AppImage` next
+to it, checks the size and SHA-256 GitHub lists, renames it over the running
+file and, after asking (sub-agents may be working), restarts into it with
+`app.relaunch({ execPath: $APPIMAGE })`. Renaming is safe while it runs: the
+running copy stays mounted from the old file. Declined, the new version starts
+the next time. The `.deb` still opens the release page: replacing it needs
+`sudo apt`.
+
+Checked in WSL (Ubuntu 24.04) with `scripts/appimage-update-check.ts`: a copy
+of the built AppImage finds a made-up release 99.0.0 served from localhost
+(`CODE_BOT_UPDATE_FEED`, honoured only for localhost addresses), downloads and
+checks it, replaces itself and starts again. The first real update this way is
+from the first release that has it to the one after.

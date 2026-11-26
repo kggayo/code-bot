@@ -6,6 +6,7 @@ import type {
   AppSettings,
   Bot,
   BotInput,
+  BranchStatus,
   BotPatch,
   BotStatus,
   BotUsage,
@@ -25,7 +26,10 @@ import type {
   Routine,
   RoutineInput,
   RoutinePatch,
+  RoutineProposal,
+  RoutineProposalClosed,
   RoutineRunData,
+  StoredEvent,
   SubagentDefaults,
   SurfacedData,
   Task,
@@ -36,6 +40,7 @@ import type {
   UserResponse,
 } from '../shared/types.ts';
 import type { Brain } from './brain.ts';
+import { branchFacts, findGh, mergeBlocker, mergeBranch, pushAndOpenPullRequest, pushBlocker } from './branches.ts';
 import type { Engine, EngineCheck, EngineUsageReport, TerminalCommand } from './engines/types.ts';
 import * as prompts from './prompts.ts';
 import { cleanSchedule, nextRun } from './routines.ts';
@@ -68,6 +73,8 @@ export interface CodeBotOptions {
   usageIntervalMs?: number;
   /** How often due routines are looked for. 0: only when asked (runDueRoutines). */
   routineTickMs?: number;
+  /** GitHub's gh program for opening pull requests. Default: "gh" if it is on the PATH. null: never use gh (tests). */
+  ghExecutable?: string | null;
 }
 
 /** What a terminal needs to continue a sub-agent's session. */
@@ -163,6 +170,12 @@ export class CodeBot {
   private lastUsageCheck = 0;
   private usageSoonTimer: ReturnType<typeof setTimeout> | undefined;
   private closing = false;
+  /** gh, found once (undefined in the options: look on the PATH). */
+  private gh: Promise<string | null> | undefined;
+  /** Sub-agents whose branch is being merged or pushed right now. */
+  private readonly handingOver = new Set<string>();
+  /** The last piece of git work on each sub-agent's worktree (oneAtATime). */
+  private readonly worktreeWork = new Map<string, Promise<unknown>>();
 
   constructor(options: CodeBotOptions) {
     this.store = options.store;
@@ -206,6 +219,8 @@ export class CodeBot {
       respondAsBot: (taskId, requestId, response) => this.tasks.respond(taskId, requestId, response, 'bot'),
       matchFolder: (bot, folder) => this.matchFolder(bot, folder),
       matchGitFolder: (bot, folder) => this.matchGitFolder(bot, folder),
+      listRoutines: () => this.listRoutines(),
+      proposeRoutine: (from, input) => this.proposeRoutine(from, input),
     };
 
     this.ensureMainBot();
@@ -228,6 +243,7 @@ export class CodeBot {
         this.runRetention().catch((error) => console.error('code-bot: retention failed:', error));
       });
     }
+    if (options.ghExecutable !== undefined) this.gh = Promise.resolve(options.ghExecutable);
     this.usageIntervalMs = options.usageIntervalMs ?? DEFAULT_USAGE_INTERVAL_MS;
     if (this.usageIntervalMs > 0) {
       this.repeat(this.usageIntervalMs, FIRST_USAGE_DELAY_MS, () => void this.checkUsage());
@@ -576,19 +592,115 @@ export class CodeBot {
       if (this.tasks.isActive(taskId)) {
         throw new CodeBotError('conflict', `Sub-agent ${taskId} is working; stop it before archiving it`);
       }
-      if (task.worktree && !task.worktree.removed) {
-        const status = await worktreeStatus(task.worktree);
-        if (status === 'dirty' && !options.discardChanges) {
-          throw new CodeBotError(
-            'conflict',
-            `Sub-agent ${taskId} has uncommitted changes in its worktree (${task.worktree.path}). Have it commit them, or archive it and discard them.`,
-          );
-        }
-        await removeWorktree(task.worktree, status === 'dirty');
-        this.tasks.setWorktree(taskId, { ...task.worktree, removed: true });
+      const worktree = task.worktree;
+      if (worktree && !worktree.removed) {
+        await this.oneAtATime(taskId, async () => {
+          const status = await worktreeStatus(worktree);
+          if (status === 'dirty' && !options.discardChanges) {
+            throw new CodeBotError(
+              'conflict',
+              `Sub-agent ${taskId} has uncommitted changes in its worktree (${worktree.path}). Have it commit them, or archive it and discard them.`,
+            );
+          }
+          await removeWorktree(worktree, status === 'dirty');
+          this.tasks.setWorktree(taskId, { ...worktree, removed: true });
+        });
       }
     }
     this.tasks.setArchived(taskId, archived);
+  }
+
+  // ---- a sub-agent's branch: merge it, or push it and open a pull request ---------
+
+  /** What the user can do with a sub-agent's worktree branch now. */
+  async getBranchStatus(taskId: string): Promise<BranchStatus> {
+    const worktree = this.worktreeOf(taskId);
+    const facts = await this.oneAtATime(taskId, () => branchFacts(worktree));
+    const busy = this.handOverBlocker(taskId);
+    return {
+      taskId,
+      branch: worktree.branch,
+      folder: worktree.folder,
+      folderBranch: facts.folderBranch,
+      ahead: facts.ahead,
+      folderDirty: facts.folderDirty,
+      worktreeDirty: facts.worktreeDirty,
+      remote: facts.remote,
+      githubRepo: facts.githubRepo,
+      gh: Boolean(await this.ghProgram()),
+      mergeBlocked: busy ?? mergeBlocker(worktree, facts),
+      pushBlocked: busy ?? pushBlocker(worktree, facts),
+      merged: worktree.merged ?? null,
+      pullRequest: worktree.pullRequest ?? null,
+    };
+  }
+
+  /** Merges a stopped sub-agent's branch into the branch the project folder is on (the user's click). */
+  async mergeBranch(taskId: string): Promise<BranchStatus> {
+    await this.handOver(taskId, async (worktree) => {
+      const merged = await mergeBranch(worktree);
+      this.tasks.setWorktree(taskId, { ...worktree, merged: { into: merged.into, commit: merged.commit, at: new Date().toISOString() } });
+      this.tasks.note(taskId, 'branch.merged', merged);
+    });
+    return this.getBranchStatus(taskId);
+  }
+
+  /** Pushes a stopped sub-agent's branch and opens a pull request into the branch it came from (the user's click). */
+  async openPullRequest(taskId: string): Promise<BranchStatus> {
+    await this.handOver(taskId, async (worktree) => {
+      const task = this.tasks.getTask(taskId);
+      const bot = this.store.getBot(task.botId);
+      const report = task.lastResult?.trim() ? clip(task.lastResult.trim(), 6000) : `${task.title}.`;
+      const body = `${report}\n\n---\nFrom code-bot: sub-agent ${task.id}${bot ? ` of the ${bot.name} project` : ''}, branch \`${worktree.branch}\`.`;
+      const pushed = await pushAndOpenPullRequest(worktree, { title: task.title, body }, await this.ghProgram());
+      this.tasks.setWorktree(taskId, { ...worktree, pullRequest: { ...pushed, at: new Date().toISOString() } });
+      this.tasks.note(taskId, 'branch.pushed', { branch: worktree.branch, ...pushed });
+    });
+    return this.getBranchStatus(taskId);
+  }
+
+  private worktreeOf(taskId: string): TaskWorktree {
+    const task = this.tasks.getTask(taskId);
+    if (!task.worktree) throw new CodeBotError('invalid', `Sub-agent ${taskId} did not work on its own branch`);
+    return task.worktree;
+  }
+
+  private handOverBlocker(taskId: string): string | null {
+    if (this.tasks.isActive(taskId)) return `Sub-agent ${taskId} is working; wait until it stops`;
+    if (this.handingOver.has(taskId)) return `The branch of ${taskId} is being merged or pushed`;
+    return null;
+  }
+
+  private async handOver(taskId: string, work: (worktree: TaskWorktree) => Promise<void>): Promise<void> {
+    const worktree = this.worktreeOf(taskId);
+    const blocker = this.handOverBlocker(taskId);
+    if (blocker) throw new CodeBotError('conflict', blocker);
+    this.handingOver.add(taskId);
+    try {
+      await this.oneAtATime(taskId, () => work(worktree));
+    } finally {
+      this.handingOver.delete(taskId);
+    }
+  }
+
+  /**
+   * Git work on one sub-agent's worktree, one piece at a time. Windows cannot remove a folder while
+   * another process (a git status for the window) works in it, so archiving waits for those.
+   */
+  private oneAtATime<T>(taskId: string, work: () => Promise<T>): Promise<T> {
+    const previous = this.worktreeWork.get(taskId) ?? Promise.resolve();
+    const next = previous.then(work, work);
+    const done = () => {
+      if (this.worktreeWork.get(taskId) === next) this.worktreeWork.delete(taskId);
+    };
+    this.worktreeWork.set(taskId, next);
+    next.then(done, done);
+    return next;
+  }
+
+  private ghProgram(): Promise<string | null> {
+    this.gh ??= findGh();
+    return this.gh;
   }
 
   listRequests(): PendingRequest[] {
@@ -654,6 +766,75 @@ export class CodeBot {
     this.startRoutine(routine, true);
     this.store.saveRoutine({ ...routine, lastRunAt: new Date().toISOString(), lastError: null });
     this.routinesChanged();
+  }
+
+  /**
+   * A bot proposes a routine in its own conversation (its propose_routine tool). Nothing is
+   * created: the proposal is a card there, and the user creates it with acceptRoutineProposal.
+   */
+  proposeRoutine(proposer: Bot, input: Omit<RoutineInput, 'enabled'>): RoutineProposal {
+    // Its current conversation, which may have changed since its tools were made.
+    const from = this.bot(proposer.id);
+    const clean = this.validateRoutine({ ...input, enabled: true });
+    const first = nextRun(clean.schedule, new Date());
+    if (!first) throw new CodeBotError('invalid', 'That time has passed: pick a time in the future');
+    const proposal: RoutineProposal = {
+      id: newId('rp'),
+      botId: clean.botId,
+      botName: this.bot(clean.botId).name,
+      title: clean.title,
+      prompt: clean.prompt,
+      schedule: clean.schedule,
+      nextRunAt: first.toISOString(),
+    };
+    this.emitThread(from.threadId, from.id, 'routine.proposed', proposal);
+    return proposal;
+  }
+
+  /** The user creates a routine a bot proposed in its current conversation. */
+  acceptRoutineProposal(botId: string, proposalId: string): Routine {
+    const bot = this.bot(botId);
+    const proposal = this.openProposal(bot, proposalId);
+    const routine = this.createRoutine({
+      botId: proposal.botId,
+      title: proposal.title,
+      prompt: proposal.prompt,
+      schedule: proposal.schedule,
+      enabled: true,
+    });
+    const closed: RoutineProposalClosed = { id: proposal.id, outcome: 'created', routineId: routine.id };
+    this.emitThread(bot.threadId, bot.id, 'routine.proposal.closed', closed);
+    return routine;
+  }
+
+  /** The user dismisses a bot's routine proposal. */
+  dismissRoutineProposal(botId: string, proposalId: string): void {
+    const bot = this.bot(botId);
+    const proposal = this.openProposal(bot, proposalId);
+    const closed: RoutineProposalClosed = { id: proposal.id, outcome: 'dismissed', routineId: null };
+    this.emitThread(bot.threadId, bot.id, 'routine.proposal.closed', closed);
+  }
+
+  /** A proposal in the bot's current conversation that is still open. */
+  private openProposal(bot: Bot, proposalId: string): RoutineProposal {
+    let proposal: RoutineProposal | undefined;
+    let closed: RoutineProposalClosed | undefined;
+    for (let after = 0; ; ) {
+      const page = this.store.listEvents(bot.threadId, after, 2000);
+      for (const event of page) {
+        const data = event.data as { id?: string };
+        if (data?.id !== proposalId) continue;
+        if (event.type === 'routine.proposed') proposal = event.data as RoutineProposal;
+        if (event.type === 'routine.proposal.closed') closed = event.data as RoutineProposalClosed;
+      }
+      if (page.length < 2000) break;
+      after = (page[page.length - 1] as StoredEvent).seq;
+    }
+    if (!proposal) throw new CodeBotError('not_found', `No routine proposal ${proposalId} in ${bot.name}'s current conversation`);
+    if (closed) {
+      throw new CodeBotError('conflict', closed.outcome === 'created' ? 'This routine was already created' : 'This proposal was dismissed');
+    }
+    return proposal;
   }
 
   /**
@@ -906,7 +1087,7 @@ export class CodeBot {
     if (bot.kind === 'main') {
       return {
         systemPrompt: prompts.mainBotPrompt(bot, this.store.listBots().filter((candidate) => candidate.kind === 'project')),
-        tools: mainBotTools(this.toolHost),
+        tools: mainBotTools(this.toolHost, bot),
         model: bot.model ?? undefined,
         effort: bot.effort ?? undefined,
         cwd: this.workDir,

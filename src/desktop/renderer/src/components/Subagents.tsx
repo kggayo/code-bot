@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import { ACTIVE_STATES } from '../../../../shared/types.ts';
-import type { BotView, ClosedData, CoreEvent, PendingRequest, Task } from '../../../../shared/types.ts';
+import type { BotView, BranchStatus, ClosedData, CoreEvent, PendingRequest, Task } from '../../../../shared/types.ts';
 import { api } from '../api.ts';
 import { ROLE_LABEL, STATE_LABEL, ago, basename, describeAgentTool, money, tokens, usageLine } from '../format.ts';
 import { useAppState } from '../state.ts';
@@ -185,6 +185,119 @@ const TaskItem = memo(function TaskItem({
 });
 
 /** One sub-agent's full history and what can be done with it. Optional: its project bot reports on it anyway. */
+const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
+
+/**
+ * For a stopped sub-agent that worked on its own branch: merge the branch into the project folder,
+ * or push it and open a pull request. Each asks once more before it runs.
+ */
+function BranchActions({ task }: { task: Task }) {
+  const [status, setStatus] = useState<BranchStatus | null>(null);
+  const [confirm, setConfirm] = useState<'merge' | 'push' | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const handed = `${task.worktree?.merged?.commit ?? ''}${task.worktree?.pullRequest?.at ?? ''}`;
+
+  useEffect(() => {
+    let live = true;
+    api
+      .getBranchStatus(task.id)
+      .then((next) => live && setStatus(next))
+      .catch((failure: unknown) => live && setError(failure instanceof Error ? failure.message : String(failure)));
+    return () => {
+      live = false;
+    };
+  }, [task.id, task.state, task.updatedAt, handed]);
+
+  const act = async (kind: 'merge' | 'push') => {
+    setBusy(true);
+    setError(null);
+    try {
+      const next = kind === 'merge' ? await api.mergeBranch(task.id) : await api.openPullRequest(task.id);
+      setStatus(next);
+      setConfirm(null);
+      // Without gh, GitHub's own page finishes the pull request.
+      const pull = next.pullRequest;
+      if (kind === 'push' && pull?.url && !pull.created) void api.openExternal(pull.url).catch(() => undefined);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+      setConfirm(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!status) return error ? <div className="form-error">{error}</div> : null;
+  const into = status.folderBranch ?? 'the project folder';
+  const base = task.worktree?.base && task.worktree.base !== 'HEAD' ? task.worktree.base : 'the default branch';
+  const pushLabel = !status.githubRepo ? 'Push branch' : status.gh ? 'Push and open pull request' : 'Push and create pull request';
+  const blocked = status.mergeBlocked && status.pushBlocked ? status.mergeBlocked : null;
+  return (
+    <div className="branch-actions" data-testid="branch-actions">
+      {status.merged && (
+        <span className="done" data-testid="branch-merged">
+          Merged into {status.merged.into} ({status.merged.commit.slice(0, 7)})
+        </span>
+      )}
+      {status.pullRequest &&
+        (status.pullRequest.url ? (
+          <button type="button" className="link" data-testid="branch-pull-request" onClick={() => void api.openExternal(status.pullRequest?.url ?? '')}>
+            {status.pullRequest.created ? 'Pull request' : 'Create the pull request on GitHub'}
+          </button>
+        ) : (
+          <span className="done" data-testid="branch-pushed">
+            Pushed to {status.pullRequest.remote}
+          </span>
+        ))}
+      {confirm === 'merge' ? (
+        <span className="confirm">
+          Merge {plural(status.ahead, 'commit')} from {status.branch} into {into} in {status.folder}?
+          <button type="button" className="primary" disabled={busy} onClick={() => void act('merge')}>
+            {busy ? 'Merging…' : 'Merge'}
+          </button>
+          <button type="button" disabled={busy} onClick={() => setConfirm(null)}>
+            Cancel
+          </button>
+        </span>
+      ) : confirm === 'push' ? (
+        <span className="confirm">
+          Push {status.branch} to {status.remote}
+          {status.githubRepo ? ` and ${status.gh ? 'open' : 'start'} a pull request into ${base} on ${status.githubRepo}` : ''}?
+          <button type="button" className="primary" disabled={busy} onClick={() => void act('push')}>
+            {busy ? 'Pushing…' : 'Push'}
+          </button>
+          <button type="button" disabled={busy} onClick={() => setConfirm(null)}>
+            Cancel
+          </button>
+        </span>
+      ) : (
+        <span className="choices">
+          {status.ahead > 0 && status.folderBranch && (
+            <span className="muted">
+              {plural(status.ahead, 'commit')} not yet in {status.folderBranch}
+            </span>
+          )}
+          <button type="button" disabled={Boolean(status.mergeBlocked)} title={status.mergeBlocked ?? undefined} onClick={() => setConfirm('merge')}>
+            Merge into {into}
+          </button>
+          <button type="button" disabled={Boolean(status.pushBlocked)} title={status.pushBlocked ?? undefined} onClick={() => setConfirm('push')}>
+            {pushLabel}
+          </button>
+        </span>
+      )}
+      {blocked && !status.merged && <small className="muted">{blocked}</small>}
+      {status.worktreeDirty && (
+        <small className="muted">It left uncommitted changes in its worktree; they are not part of the branch.</small>
+      )}
+      {error && (
+        <div className="form-error" role="alert">
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function TaskDetail({ taskId }: { taskId: string }) {
   const app = useAppState();
   const log = app.taskLogs.get(taskId);
@@ -298,6 +411,7 @@ export function TaskDetail({ taskId }: { taskId: string }) {
               {basename(task.cwd)}
             </button>
           )}
+          {task.worktree && !active && <BranchActions task={task} />}
           {error && (
             <div className="form-error" role="alert">
               {error}

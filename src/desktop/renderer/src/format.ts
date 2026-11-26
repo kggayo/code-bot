@@ -154,6 +154,10 @@ export function describeTool(name: string, input: unknown): string | null {
       return `Stopped ${str(args.id)}`;
     case 'list_subagents':
       return 'Checked the sub-agents';
+    case 'list_routines':
+      return 'Checked the routines';
+    case 'propose_routine':
+      return null;
     case 'git':
       return `git ${Array.isArray(args.args) ? args.args.map(String).join(' ') : ''}`;
     case 'Read':

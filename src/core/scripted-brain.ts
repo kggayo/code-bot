@@ -13,6 +13,8 @@ const TURN_COST_USD = 0.001;
  * Main bot:
  *   "@name <text>"   sends <text> to the project bot called name
  *   a report         replies "<name> reports: <first line of the report>"
+ * Both:
+ *   "every <n> minutes: <text>"  proposes a routine sending <text> every n minutes
  * Project bot:
  *   "task: <brief>"  starts a sub-agent with that brief
  *   an update        "<id> finished: <first line of its report>", "<id> failed: …";
@@ -45,6 +47,9 @@ export class ScriptedBrain implements Brain {
   private async *main(input: BrainInput): AsyncGenerator<BrainEvent, string> {
     const reports = [...input.prompt.matchAll(/\[report from project bot "([^"]+)"[^\]]*\]\n<<<\n([\s\S]*?)\n>>>/g)];
     if (reports.length > 0) return reports.map((match) => `${match[1]} reports: ${firstLine(match[2])}`).join('\n');
+
+    const routine = yield* proposeRoutine(input, input.prompt);
+    if (routine) return routine;
 
     const delegate = /@([\p{L}\p{N}._-]+)\s+([\s\S]+)/u.exec(input.prompt);
     if (delegate) {
@@ -97,6 +102,8 @@ export class ScriptedBrain implements Brain {
     }
 
     const body = prompt.startsWith(FROM_MAIN_HEADER) ? prompt.slice(FROM_MAIN_HEADER.length).trim() : prompt;
+    const routine = yield* proposeRoutine(input, body);
+    if (routine) return routine;
     const task = /task:\s*([\s\S]+)/i.exec(body);
     if (task) {
       const brief = task[1]!.trim();
@@ -110,6 +117,21 @@ export class ScriptedBrain implements Brain {
       }
     }
     return `echo: ${body}`;
+  }
+}
+
+/** "every <n> minutes: <text>": proposes that routine for the bot itself. Undefined when the message is something else. */
+async function* proposeRoutine(input: BrainInput, text: string): AsyncGenerator<BrainEvent, string | undefined> {
+  const match = /^every (\d+) minutes:\s*([\s\S]+)$/i.exec(text.trim());
+  if (!match) return undefined;
+  const message = match[2]!.trim();
+  const args = { title: message.slice(0, 40), message, kind: 'interval', minutes: Number(match[1]) };
+  yield { type: 'tool', name: 'propose_routine', input: args };
+  try {
+    const proposed = (await call(input, 'propose_routine', args)) as { proposed: string };
+    return `Proposed the routine "${proposed.proposed}". Create it with the card above.`;
+  } catch (error) {
+    return `Could not propose the routine: ${errorMessage(error)}`;
   }
 }
 
