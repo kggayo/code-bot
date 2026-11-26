@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { DEFAULT_SETTINGS } from '../../../../shared/types.ts';
 import type { AppSettings } from '../../../../shared/types.ts';
+import { api } from '../api.ts';
 import { useAppState } from '../state.ts';
+import { MarkdownText } from './Text.tsx';
+import { UsageMeter } from './Usage.tsx';
 
 function NumberField({
   name,
@@ -34,6 +38,90 @@ function NumberField({
       />
       <small>{hint}</small>
     </label>
+  );
+}
+
+/** The installed version, the newest release, and the button that installs it. */
+function Updates() {
+  const app = useAppState();
+  const update = app.update;
+  const [busy, setBusy] = useState<'check' | 'install' | null>(null);
+  const [confirm, setConfirm] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const working = app.bots.find((bot) => bot.kind === 'main')?.status.activeSubagents ?? 0;
+
+  const act = async (what: 'check' | 'install') => {
+    setBusy(what);
+    setError(null);
+    try {
+      if (what === 'check') await api.checkForUpdate();
+      else await api.installUpdate();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setBusy(null);
+      setConfirm(false);
+    }
+  };
+
+  const downloading = update?.downloadPercent !== null && update?.downloadPercent !== undefined;
+  return (
+    <fieldset data-testid="updates">
+      <legend>Updates</legend>
+      <p className="small-print">
+        {!update
+          ? 'Not checked yet.'
+          : update.available
+            ? `code-bot ${update.latest} is out. You have ${update.current}.`
+            : update.checkedAt
+              ? `code-bot ${update.current} is the newest version (checked ${new Date(update.checkedAt).toLocaleString()}).`
+              : `You have code-bot ${update.current}.`}
+      </p>
+      {update?.available && update.notes && (
+        <details className="release-notes">
+          <summary>What is new in {update.latest}</summary>
+          <MarkdownText text={update.notes} />
+        </details>
+      )}
+      {update?.available && update.methodNote && <small>{update.methodNote}</small>}
+      {downloading && (
+        <div className="usage-bar" role="progressbar" aria-label="Downloading the update" aria-valuenow={update?.downloadPercent ?? 0}>
+          <span style={{ '--used': `${update?.downloadPercent ?? 0}%` } as CSSProperties} />
+        </div>
+      )}
+      {(error || update?.error) && (
+        <p className="form-error small-print" role="alert">
+          {error ?? update?.error}
+        </p>
+      )}
+      {confirm && (
+        <p className="held-note">
+          Installing closes code-bot{working ? `; the ${working} sub-agent(s) working now stop and can be resumed afterwards` : ''}. The
+          installer then opens; finish it to start the new version.
+        </p>
+      )}
+      <div className="inline-actions">
+        <button type="button" onClick={() => void act('check')} disabled={busy !== null}>
+          {busy === 'check' ? 'Checking…' : 'Check for updates'}
+        </button>
+        {update?.available &&
+          (update.method === 'installer' ? (
+            confirm ? (
+              <button type="button" className="primary" data-testid="install-update" onClick={() => void act('install')} disabled={busy !== null}>
+                {busy === 'install' ? (downloading ? `Downloading… ${update.downloadPercent}%` : 'Starting…') : `Install ${update.latest} now`}
+              </button>
+            ) : (
+              <button type="button" className="primary" data-testid="install-update" onClick={() => setConfirm(true)}>
+                Update to {update.latest}
+              </button>
+            )
+          ) : (
+            <button type="button" className="primary" data-testid="install-update" onClick={() => void act('install')}>
+              Open the release page
+            </button>
+          ))}
+      </div>
+    </fieldset>
   );
 }
 
@@ -128,6 +216,15 @@ export function AppSettingsDialog() {
             {app.checkingEngines ? 'Checking…' : 'Check again'}
           </button>
         </fieldset>
+        <fieldset>
+          <legend>Plan limits</legend>
+          <UsageMeter />
+          <small>
+            Read from Claude Code and Codex without using any model usage. Costs shown next to bots and sub-agents are the agents' own
+            estimates at API prices; a subscription is not billed per call.
+          </small>
+        </fieldset>
+        <Updates />
         {app.info && (
           <p className="muted small-print">
             code-bot {app.info.version} · data in {app.info.dataDir}

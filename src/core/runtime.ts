@@ -10,6 +10,8 @@ export type Inbound =
   | { kind: 'main'; text: string }
   /** From a project bot to the main bot. */
   | { kind: 'report'; fromBotId: string; text: string }
+  /** A routine the user set up, due now (or run by hand). */
+  | { kind: 'routine'; routineId: string; title: string; text: string }
   /** About one of a project bot's sub-agents. */
   | { kind: 'task'; taskId: string; event: 'question' | 'done' | 'failed'; requestId?: string; requester: Requester };
 
@@ -46,6 +48,8 @@ export interface RuntimeHost {
   brainOptions(botId: string): BrainOptions;
   conversation(botId: string): { threadId: string; sessionId: string | null };
   saveSession(threadId: string, sessionId: string): void;
+  /** The bot session's cost so far, as the engine estimates it. */
+  saveCost(threadId: string, costUsd: number): void;
   emit(threadId: string, botId: string, type: string, data: unknown, liveOnly?: boolean): void;
   /** Called after every turn. Returns where the reply was passed on to, if anywhere. */
   finished(botId: string, turn: PreparedTurn, outcome: TurnOutcome): { forwardedTo?: 'main' };
@@ -186,6 +190,7 @@ export class BotRuntime {
             ok = event.ok;
             text = event.text || lastText;
             error = event.error;
+            if (event.costUsd !== undefined) this.host.saveCost(threadId, event.costUsd);
             break;
         }
       }

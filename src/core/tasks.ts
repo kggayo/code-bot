@@ -1,7 +1,16 @@
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { ACTIVE_STATES, DEFAULT_SETTINGS } from '../shared/types.ts';
-import type { CoreEvent, PendingRequest, Requester, Task, TaskState, TaskWorktree, UserResponse } from '../shared/types.ts';
+import type {
+  CoreEvent,
+  PendingRequest,
+  Requester,
+  SubagentRole,
+  Task,
+  TaskState,
+  TaskWorktree,
+  UserResponse,
+} from '../shared/types.ts';
 import type { AskUser, Engine, EngineEvent, EngineRun } from './engines/types.ts';
 import type { Store } from './store.ts';
 import { CodeBotError, errorMessage, newId, titleFrom, truncate } from './util.ts';
@@ -13,6 +22,10 @@ export interface NewTask {
   prompt: string;
   title?: string;
   requestedBy: Requester;
+  /** Default: developer. */
+  role?: SubagentRole;
+  /** For QA and reviewers: the developer sub-agent whose work this one checks. */
+  forTaskId?: string | null;
   cwd: string;
   additionalDirectories: string[];
   engine: string;
@@ -69,6 +82,11 @@ interface HeldRequest {
 
 /** How long shutdown waits for agents to wind down before giving up on them. */
 const SHUTDOWN_WAIT_MS = 10_000;
+/**
+ * Strings in a request's input are kept up to this long (other events: 2000). People
+ * approve what they see, so a plan or a file to write should be shown whole.
+ */
+const REQUEST_STRING_LIMIT = 30_000;
 
 /** JSON with object keys sorted, so equal values give equal text. */
 function stableJson(value: unknown): string {
@@ -248,6 +266,8 @@ export class TaskManager {
       title: input.title?.trim() || titleFrom(prompt),
       state: 'running',
       requestedBy: input.requestedBy,
+      role: input.role ?? 'developer',
+      forTaskId: input.forTaskId ?? null,
       engine: input.engine,
       model: input.model,
       effort: input.effort,
@@ -259,6 +279,7 @@ export class TaskManager {
       lastResult: null,
       error: null,
       costUsd: 0,
+      tokens: 0,
       maxTurns: input.maxTurns ?? null,
       maxBudgetUsd: input.maxBudgetUsd ?? null,
       worktree: input.worktree ?? null,
@@ -373,6 +394,18 @@ export class TaskManager {
     const archivedAt = archived ? (task.archivedAt ?? new Date().toISOString()) : null;
     const updated = this.store.updateTask(taskId, { archivedAt }, false);
     this.emit(taskId, task.botId, archived ? 'archived' : 'unarchived', { archivedAt });
+    return updated;
+  }
+
+  /**
+   * Changes how much the sub-agent may do without asking, from its next turn on
+   * (a working sub-agent keeps its current mode until its turn ends).
+   */
+  setPermissionMode(taskId: string, permissionMode: string): Task {
+    const task = this.getTask(taskId);
+    if (task.permissionMode === permissionMode) return task;
+    const updated = this.store.updateTask(taskId, { permissionMode }, false);
+    this.emit(taskId, task.botId, 'settings', { permissionMode });
     return updated;
   }
 
@@ -509,7 +542,7 @@ export class TaskManager {
       return new Promise<UserResponse>((resolve, reject) => {
         const pending: PendingRequest = {
           ...request,
-          input: truncate(request.input),
+          input: truncate(request.input, 0, REQUEST_STRING_LIMIT),
           id: newId('r'),
           taskId: task.id,
           botId: task.botId,
@@ -589,13 +622,19 @@ export class TaskManager {
             break;
           case 'result':
             last = event;
-            if (event.costUsd !== undefined) this.store.updateTask(taskId, { costUsd: event.costUsd });
+            if (event.costUsd !== undefined || event.tokens !== undefined) {
+              this.store.updateTask(taskId, {
+                ...(event.costUsd !== undefined ? { costUsd: event.costUsd } : {}),
+                ...(event.tokens !== undefined ? { tokens: event.tokens } : {}),
+              });
+            }
             this.emit(taskId, botId, 'result', {
               ok: event.ok,
               text: event.text,
               error: event.error,
               limit: event.limit,
               costUsd: event.costUsd,
+              tokens: event.tokens,
               durationMs: event.durationMs,
               numTurns: event.numTurns,
             });

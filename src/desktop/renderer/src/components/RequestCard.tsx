@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import type { ClosedData, PendingRequest } from '../../../../shared/types.ts';
+import type { ClosedData, PendingRequest, UserResponse } from '../../../../shared/types.ts';
 import { state } from '../state.ts';
+import { RequestDetails, approvalTitle } from './RequestDetails.tsx';
 import { TaskChip } from './Text.tsx';
 
 interface Question {
@@ -21,17 +22,6 @@ interface RequestCardProps {
   taskTitle?: string;
 }
 
-/** What an approval is for: a command as plain text (not JSON-escaped), then any other fields. */
-function inputText(input: unknown): string {
-  if (input && typeof input === 'object' && !Array.isArray(input)) {
-    const { command, ...rest } = input as Record<string, unknown>;
-    if (typeof command === 'string') {
-      return Object.keys(rest).length > 0 ? `${command}\n\n${JSON.stringify(rest, null, 2)}` : command;
-    }
-  }
-  return JSON.stringify(input, null, 2);
-}
-
 function outcome(request: PendingRequest, closed: ClosedData | undefined, botName: string | undefined): string {
   if (!closed) return 'No longer waiting.';
   if (closed.by === 'bot') return `Answered by ${botName ?? 'the project'} bot.`;
@@ -50,14 +40,18 @@ export function RequestCard({ request, open, held, closed, botName, taskTitle }:
   const [typed, setTyped] = useState<string[]>(() => questions.map(() => ''));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** What this window sent, shown at once while the confirmation travels back. */
+  const [sent, setSent] = useState<UserResponse | null>(null);
 
-  const answer = async (response: Parameters<typeof state.respond>[2]) => {
+  const answer = async (response: UserResponse) => {
     setBusy(true);
     setError(null);
     try {
       await state.respond(request.taskId, request.id, response);
+      setSent(response);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
       setBusy(false);
     }
   };
@@ -77,7 +71,7 @@ export function RequestCard({ request, open, held, closed, botName, taskTitle }:
     for (const [index, question] of questions.entries()) {
       const value = typed[index]?.trim() || (picks[index] ?? []).join(', ');
       if (!value) {
-        setError('Pick an option or type an answer for each question.');
+        setError(`Pick an option or type an answer${questions.length > 1 ? ' for each question' : ''}.`);
         return;
       }
       answers[question.question] = value;
@@ -85,11 +79,13 @@ export function RequestCard({ request, open, held, closed, botName, taskTitle }:
     void answer({ decision: 'allow', answers });
   };
 
-  const disabled = !open || busy;
-  const heading = request.kind === 'question' ? 'Question' : 'Approval needed';
+  const waiting = open && !sent;
+  const disabled = !waiting || busy;
+  const answers = closed?.answers ?? (sent?.decision === 'allow' ? sent.answers : undefined);
+  const heading = request.kind === 'question' ? 'Question' : request.tool === 'ExitPlanMode' ? 'Plan to approve' : 'Approval needed';
 
   return (
-    <div className={`request-card${open ? '' : ' closed'}`} data-kind={request.kind}>
+    <div className={`request-card${waiting ? '' : ' closed'}`} data-kind={request.kind} data-testid="request-card">
       <div className="request-head">
         <span className="request-kind">{heading}</span>
         <span className="request-from">
@@ -100,52 +96,73 @@ export function RequestCard({ request, open, held, closed, botName, taskTitle }:
       </div>
 
       {questions.length > 0 ? (
-        questions.map((question, index) => (
-          <fieldset key={question.question} className="question" disabled={disabled}>
-            <legend>{question.question}</legend>
-            <div className="options">
-              {(question.options ?? []).map((option) => (
-                <button
-                  key={option.label}
-                  type="button"
-                  className="option"
-                  aria-pressed={(picks[index] ?? []).includes(option.label)}
-                  onClick={() => toggle(index, option.label, question.multiSelect === true)}
-                >
-                  <span>{option.label}</span>
-                  {option.description && <small>{option.description}</small>}
-                </button>
-              ))}
+        questions.map((question, index) =>
+          waiting ? (
+            <fieldset key={question.question} className="question" disabled={disabled}>
+              <legend>{question.question}</legend>
+              <div className="options">
+                {(question.options ?? []).map((option) => (
+                  <button
+                    key={option.label}
+                    type="button"
+                    className="option"
+                    aria-pressed={(picks[index] ?? []).includes(option.label)}
+                    onClick={() => toggle(index, option.label, question.multiSelect === true)}
+                  >
+                    <span>{option.label}</span>
+                    {option.description && <small>{option.description}</small>}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="text"
+                placeholder="Or type your own answer"
+                aria-label="Your own answer"
+                value={typed[index] ?? ''}
+                onChange={(event) => setTyped((current) => current.map((item, i) => (i === index ? event.target.value : item)))}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    submit();
+                  }
+                }}
+              />
+            </fieldset>
+          ) : (
+            <div key={question.question} className="question answered">
+              <p className="question-text">{question.question}</p>
+              {answers?.[question.question] && (
+                <p className="answer" data-testid="answer">
+                  ✓ {answers[question.question]}
+                </p>
+              )}
             </div>
-            <input
-              type="text"
-              placeholder="Or type your own answer"
-              aria-label="Your own answer"
-              value={typed[index] ?? ''}
-              onChange={(event) => setTyped((current) => current.map((item, i) => (i === index ? event.target.value : item)))}
-            />
-          </fieldset>
-        ))
+          ),
+        )
       ) : (
         <>
           <div className="request-what">
-            <strong>{request.tool}</strong>
-            {request.summary && <span> · {request.summary}</span>}
+            <strong>{approvalTitle(request)}</strong>
+            {request.summary && <span className="muted"> · {request.summary}</span>}
           </div>
-          <pre className="request-input">{inputText(request.input)}</pre>
+          <RequestDetails request={request} />
         </>
       )}
 
-      {open && held && (
+      {waiting && held && (
         <p className="held-note">code-bot was closed while this waited. Answering resumes the sub-agent with your answer.</p>
       )}
-      {error && <p className="request-error" role="alert">{error}</p>}
-      {open ? (
+      {error && (
+        <p className="request-error" role="alert">
+          {error}
+        </p>
+      )}
+      {waiting ? (
         <div className="request-actions">
           {request.kind === 'question' && questions.length > 0 ? (
             <>
               <button type="button" className="primary" disabled={disabled} onClick={submit}>
-                Send answer
+                {busy ? 'Sending…' : 'Send answer'}
               </button>
               <button
                 type="button"
@@ -158,7 +175,7 @@ export function RequestCard({ request, open, held, closed, botName, taskTitle }:
           ) : (
             <>
               <button type="button" className="primary" disabled={disabled} onClick={() => void answer({ decision: 'allow' })}>
-                Allow
+                {busy ? 'Sending…' : request.tool === 'ExitPlanMode' ? 'Approve' : 'Allow'}
               </button>
               <button type="button" disabled={disabled} onClick={() => void answer({ decision: 'deny' })}>
                 Deny
@@ -167,7 +184,10 @@ export function RequestCard({ request, open, held, closed, botName, taskTitle }:
           )}
         </div>
       ) : (
-        <p className="request-outcome">{outcome(request, closed, botName)}</p>
+        <p className="request-outcome" data-testid="request-outcome">
+          {closed || !sent ? outcome(request, closed, botName) : sent.decision === 'allow' ? 'Sent. The sub-agent carries on.' : 'Sent.'}
+          {closed?.message && closed.by === 'user' && request.kind === 'permission' && <span className="muted"> ({closed.message})</span>}
+        </p>
       )}
     </div>
   );

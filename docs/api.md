@@ -34,7 +34,15 @@ are `CodeBotError` with a `code`: `invalid`, `not_found`, `conflict` or `busy`.
   },
   "threadId": "c_9f…",             // current conversation
   "createdAt": "…", "updatedAt": "…",
-  "status": { "busy": false, "activeSubagents": 2, "needsYou": 1 }
+  "status": {
+    "busy": false, "activeSubagents": 2, "needsYou": 1,
+    "usage": {                     // BotUsage: the engines' own estimates so far (US dollars at API prices)
+      "botUsd": 0.42,              // the bot's own conversations
+      "projectBotsUsd": 0,         // main bot only: every project bot's own conversations
+      "subagentsUsd": 3.1,         // its sub-agents (main bot: all), archived ones included
+      "subagentTokens": 182000     // sub-agents whose engine reports tokens, not money (Codex)
+    }
+  }
 }
 
 // Task: one sub-agent's work
@@ -44,6 +52,8 @@ are `CodeBotError` with a `code`: `invalid`, `not_found`, `conflict` or `busy`.
   "title": "Fix null check in OrderService",
   "state": "running",              // running | waiting | done | failed | cancelled | interrupted
   "requestedBy": "main",           // "user" or "main": who hears about it
+  "role": "developer",             // developer | qa | reviewer | other (older sub-agents: developer)
+  "forTaskId": null,               // qa and reviewer: the developer sub-agent whose work it checks
   "engine": "claude", "model": "sonnet", "effort": "medium", "permissionMode": "acceptEdits",
   "cwd": "C:\\Users\\me\\AppData\\Roaming\\code-bot\\worktrees\\t_921b524ccc",
   "additionalDirectories": ["C:\\src\\webshop-web"],
@@ -52,6 +62,7 @@ are `CodeBotError` with a `code`: `invalid`, `not_found`, `conflict` or `busy`.
   "lastResult": "Changed OrderService.cs …",  // its last report
   "error": null,
   "costUsd": 0.0087,               // the engine's estimate for the session, not a bill
+  "tokens": 0,                     // the session's tokens, for engines that report tokens instead (Codex)
   "maxTurns": 50, "maxBudgetUsd": 5,   // the limits that applied to its last run
   "worktree": {                    // null when it works in the shared folder
     "path": "C:\\Users\\me\\AppData\\Roaming\\code-bot\\worktrees\\t_921b524ccc",
@@ -68,7 +79,7 @@ are `CodeBotError` with a `code`: `invalid`, `not_found`, `conflict` or `busy`.
   "id": "r_1f0c2ab9d3", "taskId": "t_921b524ccc", "botId": "b_12a27fb811",
   "kind": "permission",            // or "question"
   "tool": "Bash",                  // "AskUserQuestion" for questions
-  "input": { "command": "npm test" },
+  "input": { "command": "npm test" }, // strings kept up to 30000 characters (a plan, a file to write); other events cut at 2000
   "summary": "Run npm test",
   "createdAt": "…",
   "surfacedIn": "c_9f…",           // the conversation it was put to the user in; null until then
@@ -85,6 +96,33 @@ are `CodeBotError` with a `code`: `invalid`, `not_found`, `conflict` or `busy`.
 // EngineInfo (checkEngines)
 { "id": "claude", "label": "Claude Code", "ready": true,
   "detail": "Claude Code is signed in (claude.ai).", "canSignIn": false, "canResume": true }
+
+// EngineUsage (getUsage, checkUsage): a coding agent's plan limits
+{ "engineId": "claude", "label": "Claude Code", "plan": "max",
+  "windows": [                     // UsageWindow
+    { "id": "session", "label": "5-hour session", "usedPercent": 6, "resetsAt": "…", "severity": "normal" },
+    { "id": "weekly_all", "label": "Week · all models", "usedPercent": 1, "resetsAt": "…", "severity": "normal" },
+    { "id": "weekly_scoped:opus", "label": "Week · Opus", "usedPercent": 0, "resetsAt": "…", "severity": null }
+  ],
+  "note": null,                    // why there are no windows (API key: no plan limits), or what went wrong
+  "checkedAt": "…" }
+
+// Routine: a message sent to a bot on a schedule, as if the user typed it
+{ "id": "rt_…", "botId": "b_…",    // or "main"
+  "title": "Morning tickets", "prompt": "Check ClickUp for new bugs and summarise them.",
+  "schedule": { "kind": "daily", "time": "09:00", "days": [1, 2, 3, 4, 5] },
+  // or { "kind": "interval", "minutes": 120 } (15 to 10080), or { "kind": "once", "at": "<ISO time>" }
+  "enabled": true,
+  "nextRunAt": "…",                // null: will not run again (a "once" that ran) or paused
+  "lastRunAt": "…", "lastError": null,
+  "createdAt": "…", "updatedAt": "…" }
+
+// UpdateInfo (getUpdate, checkForUpdate; desktop only)
+{ "current": "0.3.1", "latest": "0.4.0", "available": true,
+  "method": "installer",           // installer: downloads and starts the Windows installer; manual: opens the release page
+  "methodNote": null,              // why it is manual here (portable zip, Linux, running from source)
+  "url": "https://github.com/kggayo/code-bot/releases/tag/v0.4.0", "notes": "…",
+  "checkedAt": "…", "downloadPercent": null, "error": null }
 
 // CoreEvent
 { "scope": "thread", "id": "c_9f…", "botId": "main", "seq": 4, "ts": "…", "type": "bot.text", "data": { "text": "…" } }
@@ -121,6 +159,13 @@ id (`scope: bot`) or `"app"` (`scope: app`).
 | `setTaskArchived(taskId, archived, { discardChanges? })` | Hides a stopped sub-agent (or shows it again). Archiving removes its worktree folder; the branch is deleted only if it is merged. Refused (`conflict`) while it works, or when its worktree has uncommitted changes unless `discardChanges`. |
 | `listRequests()` | Every open question and approval, including held ones from before a restart. |
 | `respond(taskId, requestId, response)` | Answers a request. `response` is `{ "decision": "allow", "answers"?: { "<question text>": "<answer>" } }` or `{ "decision": "deny", "message"?: "…" }`. Answering the last held request of a sub-agent resumes it. |
+| `getUsage()` | `EngineUsage[]`: the plan limits as last read (reads them the first time). |
+| `checkUsage()` | Reads the plan limits now, for Claude Code (the bots) and every engine a project uses. No model usage: Claude Code's `/usage` data and Codex's `account/rateLimits/read`. The core also reads them 3 seconds after start, every 10 minutes, and (at most every 2 minutes) after a sub-agent run or bot turn ends. |
+| `listRoutines()` | `Routine[]` of bots that still exist, the next to run first, then the ones that will not run again. |
+| `createRoutine(input)` | `{ botId, title, prompt, schedule, enabled }`. Title 1-80 characters, prompt up to 20000; daily needs `HH:MM` and at least one weekday; interval 15 to 10080 minutes; a "once" time must be in the future. |
+| `updateRoutine(routineId, patch)` | Changes it; a new schedule or `enabled` plans the next run again from now. |
+| `deleteRoutine(routineId)` | Removes it. |
+| `runRoutine(routineId)` | Sends its message now ("Run now"); the schedule stays. |
 | `checkFolders(paths)` | `[{ path, exists }]` for absolute paths of existing folders. |
 | `pickFolders()` | Desktop only: the native folder picker; `[]` if cancelled. |
 | `openExternal(url)` | Desktop only: opens an http(s) link in the default browser. |
@@ -128,6 +173,9 @@ id (`scope: bot`) or `"app"` (`scope: app`).
 | `notify({ title, body, botId? })` | Desktop only: a system notification; clicking it opens the bot. |
 | `signIn(engineId)` | Desktop only: opens a terminal running the agent's sign-in (`claude auth login`, `codex login`). |
 | `openInTerminal(taskId)` | Desktop only: opens a terminal in the sub-agent's folder that continues its session interactively (`claude --resume <id>`, `codex resume <id>`). Refused while it is working. |
+| `getUpdate()` | Desktop only: `UpdateInfo` as last checked. |
+| `checkForUpdate()` | Desktop only: asks GitHub for the newest release of kggayo/code-bot. Never fails; a problem is in `error`. The app also checks 15 seconds after start and every 6 hours (not in demo mode, nor with `CODE_BOT_NO_UPDATE_CHECK=1`). |
+| `installUpdate()` | Desktop only: `method: "installer"` downloads `code-bot-Setup-<version>.exe`, checks its size and the SHA-256 GitHub lists, asks to quit if sub-agents work, starts the installer and quits. `manual` opens the release page. |
 
 For questions, `answers` maps each question's exact text to the chosen option
 label or free text; several labels for a multi-select question are joined with
@@ -145,7 +193,8 @@ label or free text; several labels for a multi-select question are joined with
 | `bot.tool` | `{ name, input }` | The bot used a tool (see the tools in `src/core/tools.ts`). |
 | `subagent.started` | `{ taskId, title, branch? }` | The project bot started a sub-agent; `branch` when it has its own worktree. |
 | `request.surfaced` | `SurfacedData`: `{ request, taskTitle, botName }` | A question or approval put to the user here. |
-| `request.closed` | `ClosedData`: `{ requestId, decision, by }` | It was answered. `decision`: `allow`, `deny` or `withdrawn`; `by`: `user`, `bot` (the project bot answered) or `system` (the sub-agent stopped). |
+| `request.closed` | `ClosedData`: `{ requestId, decision, by, answers?, message? }` | It was answered. `decision`: `allow`, `deny` or `withdrawn`; `by`: `user`, `bot` (the project bot answered) or `system` (the sub-agent stopped). `answers`: what was answered (questions); `message`: the note with a decline. |
+| `routine.run` | `RoutineRunData`: `{ routineId, title, text, manual }` | A routine sent its message to this bot; a turn follows. `manual` when it was "Run now". |
 | `turn.end` | `TurnEndData`: `{ ok, error?, forwardedTo? }` | The turn ended. `forwardedTo: "main"` when the reply was passed on to the main bot. |
 | `thread.reset` | `{}` | First event of a new conversation (the event's `id` is the new thread). |
 
@@ -162,8 +211,9 @@ label or free text; several labels for a multi-select question are joined with
 | `tool.result` | `{ id, isError, preview }` | Its outcome, cut. |
 | `request` | `PendingRequest` | The sub-agent is waiting for an answer. |
 | `request.resolved` | `{ id, decision, by, surfacedIn, … }` | `by`: `user`, `bot` or `system`; `decision`: `allow`, `deny` or `withdrawn`. |
-| `result` | `{ ok, text, error?, limit?, costUsd?, durationMs?, numTurns? }` | A turn ended; `limit` is `turns` or `budget` when a limit stopped it. |
+| `result` | `{ ok, text, error?, limit?, costUsd?, tokens?, durationMs?, numTurns? }` | A turn ended; `limit` is `turns` or `budget` when a limit stopped it. `tokens`: the session's total, for engines that report tokens (Codex). |
 | `state` | `{ state, error? }` | The task changed state. |
+| `settings` | `{ permissionMode }` | Its project bot changed its permission mode; it applies from its next turn. |
 | `archived` / `unarchived` | `{ archivedAt }` | It was archived, or shown again. |
 | `worktree` | `{ worktree }` | Its worktree was removed or brought back. |
 | `deleted` | `{}` | Live only (`seq: 0`): retention deleted it and its history. |
@@ -172,7 +222,7 @@ label or free text; several labels for a multi-select question are joined with
 
 | Type | `data` | Notes |
 |---|---|---|
-| `status` | `BotStatus`: `{ busy, activeSubagents, needsYou }` | Sent whenever any of the three may have changed. |
+| `status` | `BotStatus`: `{ busy, activeSubagents, needsYou, usage }` | Sent whenever any of them may have changed (also when a bot turn or sub-agent run reports its cost). |
 | `changed` | `{}` | The bot was created or its settings changed; fetch `listBots()`. |
 | `archived` | `{}` | The bot was removed. |
 | `conversations` | `{ threadId? }` | Its conversations changed (archived, deleted, a new current one). With `threadId`: that is now the current conversation. |
@@ -183,6 +233,9 @@ label or free text; several labels for a multi-select question are joined with
 |---|---|---|
 | `settings` | `AppSettings` | The settings changed. |
 | `engines` | `EngineInfo[]` | The coding agents were checked. |
+| `usage` | `EngineUsage[]` | The plan limits were read. |
+| `routines` | `Routine[]` | A routine was added, changed, removed or ran. |
+| `update` | `UpdateInfo` | Desktop only, sent by the main process: an update check finished, or the installer download moved on. |
 
 ## Tools the bots have
 
@@ -192,11 +245,21 @@ Main bot: `list_project_bots`, `send_to_project_bot { bot, message }`,
 `project_bot_status { bot }`.
 
 Project bot: `list_subagents { active_only? }`,
-`start_subagent { title, brief, folder?, model?, effort?, permission_mode?, worktree? }`
-(`worktree: true` gives it its own worktree and branch, `false` the shared
-folder; default: the project's setting), `get_subagent { id }` (includes its
-`worktree`), `send_to_subagent { id, text }`,
+`start_subagent { title, brief, role?, for_subagent?, folder?, model?, effort?, permission_mode?, worktree? }`
+(`role`: `developer` by default, `qa`, `reviewer` or `other`; `for_subagent`:
+for QA and reviewers, the developer whose work they check, refused for a
+developer with a pointer to `send_to_subagent`; `worktree: true` gives it its
+own worktree and branch, `false` the shared folder; default: the project's
+setting), `get_subagent { id }` (includes its `worktree`),
+`send_to_subagent { id, text, permission_mode? }` (`permission_mode` changes
+its permissions from its next turn, up to the project's setting),
 `answer_subagent { id, request_id, answers? | decline? }`,
 `cancel_subagent { id }`, `git { args, folder? }` (read-only: status, diff,
 log, show, branch, ls-files; `folder` may also be one of its sub-agents'
-worktrees). Sub-agent summaries include their `branch`.
+worktrees). Sub-agent summaries include their `branch`, `role`,
+`for_subagent` and `permission_mode`.
+
+Messages to a project bot from the user, the main bot or a routine end with a
+list of its recent sub-agents (`prompts.recentSubagents`: up to 8 unarchived
+ones active in the last 14 days, with role, state and branch), so a follow-up
+goes to the sub-agent that has the work.

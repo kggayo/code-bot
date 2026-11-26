@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { MAIN_BOT_ID } from '../shared/types.ts';
 import type { Brain, BrainEvent, BrainInput } from './brain.ts';
-import { FROM_MAIN_HEADER, UPDATE_HEADER } from './prompts.ts';
+import { FROM_MAIN_HEADER, UPDATE_HEADER, withoutRecent } from './prompts.ts';
 import { errorMessage } from './util.ts';
+
+const TURN_COST_USD = 0.001;
 
 /**
  * A scripted stand-in for the bots' model: deterministic and free, for tests
@@ -19,19 +21,25 @@ import { errorMessage } from './util.ts';
  * Anything else is echoed back.
  */
 export class ScriptedBrain implements Brain {
+  /** Made-up cost per session, so usage shows up in demo mode: each turn costs $0.001. */
+  private readonly sessionCosts = new Map<string, number>();
+
   async *run(input: BrainInput): AsyncGenerator<BrainEvent> {
     // Behave like a real model: never answer within the caller's own call.
     await new Promise((resolve) => setTimeout(resolve, 5));
-    yield { type: 'session', sessionId: input.sessionId ?? randomUUID() };
+    const sessionId = input.sessionId ?? randomUUID();
+    yield { type: 'session', sessionId };
     const reply = input.botId === MAIN_BOT_ID ? yield* this.main(input) : yield* this.project(input);
+    const costUsd = (this.sessionCosts.get(sessionId) ?? 0) + TURN_COST_USD;
+    this.sessionCosts.set(sessionId, costUsd);
     if (input.signal.aborted) {
-      yield { type: 'result', ok: false, text: '', error: 'Stopped.' };
+      yield { type: 'result', ok: false, text: '', error: 'Stopped.', costUsd };
       return;
     }
     yield { type: 'text_delta', text: reply.slice(0, 6) };
     yield { type: 'text_delta', text: reply.slice(6) };
     yield { type: 'text', text: reply };
-    yield { type: 'result', ok: true, text: reply };
+    yield { type: 'result', ok: true, text: reply, costUsd };
   }
 
   private async *main(input: BrainInput): AsyncGenerator<BrainEvent, string> {
@@ -53,7 +61,7 @@ export class ScriptedBrain implements Brain {
   }
 
   private async *project(input: BrainInput): AsyncGenerator<BrainEvent, string> {
-    const prompt = input.prompt;
+    const prompt = withoutRecent(input.prompt);
     if (prompt.startsWith(UPDATE_HEADER)) {
       const lines: string[] = [];
       const updates = prompt.matchAll(

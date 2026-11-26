@@ -61,7 +61,8 @@ sub-agent (but can open one and write to it).
 | `src/core/runtime.ts` | `BotRuntime`: one bot's inbound queue and turn loop. Batches updates, runs the brain, reports the outcome to its host. |
 | `src/core/tools.ts` | The tools each kind of bot gets (`mainBotTools`, `projectBotTools`) and the `ToolHost` interface they use. |
 | `src/core/prompts.ts` | Every system prompt and how inbound messages are framed for a bot. |
-| `src/core/tasks.ts` | `TaskManager`: sub-agent lifecycle, request relay and held requests, limits, follow-ups, cancel, archive, shutdown. |
+| `src/core/tasks.ts` | `TaskManager`: sub-agent lifecycle, request relay and held requests, limits, follow-ups, permission changes, cancel, archive, shutdown. |
+| `src/core/routines.ts` | Routine schedules: checking them (`cleanSchedule`) and the next run (`nextRun`). Running them is in `CodeBot`. |
 | `src/core/worktrees.ts` | Creating, removing and restoring sub-agents' git worktrees; copying untracked files into them. |
 | `src/core/version.ts` | The version agents see (kept equal to `package.json` by a test). |
 | `src/core/brain.ts` | `Brain` interface, `BotTool`, and `ClaudeBrain`. |
@@ -75,7 +76,9 @@ sub-agent (but can open one and write to it).
 | `src/core/store.ts` | SQLite persistence (`node:sqlite`, synchronous). Tables `bots`, `threads`, `tasks`, `events`, `requests`, `settings`. Schema version in `PRAGMA user_version`, upgraded by the `MIGRATIONS` list. |
 | `src/core/util.ts` | `CodeBotError`, ids, truncation helpers. |
 | `src/desktop/main/index.ts` | Electron main process: data folder, engines and brain selection, window, quit handling, single instance. |
-| `src/desktop/main/ipc.ts` | The IPC handler: sender check, argument validation for every method, desktop-only methods (folder picker, notifications, open link/folder, terminals). |
+| `src/desktop/main/ipc.ts` | The IPC handler: sender check, argument validation for every method, desktop-only methods (folder picker, notifications, open link/folder, terminals, updates). |
+| `src/desktop/main/badge.ts` | The waiting count on the taskbar or dock icon: an overlay badge drawn pixel by pixel on Windows, the dock badge on macOS, the launcher count on Linux. |
+| `src/desktop/main/updates.ts` | `Updater`: asks GitHub for the newest release, downloads and checks the Windows installer, starts it. |
 | `src/desktop/main/terminal.ts` | Opens a terminal window running one program (sign-in, continuing a session) on Windows, macOS and Linux. |
 | `src/desktop/preload/index.ts` | Exposes `window.codeBot` (the `DesktopBridge`). Built as one CommonJS file. |
 | `src/desktop/renderer/` | The interface. `src/state.ts` holds all window state; `src/components/` the views. |
@@ -120,6 +123,34 @@ its own conversation and nothing goes to the main bot.
 - Out-of-date updates are dropped when the turn is prepared (`CodeBot.prepare`):
   a question already answered or already with the user, or a "finished" for a
   task that has been continued since.
+
+### One developer per piece of work
+
+A piece of work (a ticket, a bug, a feature) belongs to one developer
+sub-agent from investigation to fix: the user's answers and decisions, "now
+fix it", and QA or review findings all go to it with `send_to_subagent`, so it
+keeps its context and its branch, and no second worktree appears. New
+sub-agents are for another role or independent work: QA (`role: "qa"`) and
+reviewers (`role: "reviewer"`) name the developer they check
+(`for_subagent`, stored as `Task.forTaskId`), and when one of them finishes
+the update to the lead says to send findings to that developer and then ask
+the checker again. What makes the lead do this:
+
+- The project bot's system prompt (`prompts.projectBotPrompt`) and the tool
+  descriptions say so.
+- Every message from the user, the main bot or a routine ends with the
+  project's recent sub-agents (`prompts.recentSubagents`), so the lead sees
+  which one a follow-up is about. `ScriptedBrain` strips the list
+  (`prompts.withoutRecent`).
+- `start_subagent` with `for_subagent` and the developer role is refused with a
+  pointer to `send_to_subagent`.
+- An investigation started read-only (`permission_mode: "plan"`) can be let
+  loose for the fix with `send_to_subagent { permission_mode }` (never beyond
+  the project's mode; `TaskManager.setPermissionMode`, from the next turn). A
+  sub-agent's folder and worktree cannot change: Claude Code keeps sessions per
+  folder, so the lead is told to start the developer the way the fix needs.
+- The main bot is told to pass the user's answers to the same project bot with
+  the work and sub-agent ids they are about.
 
 ### Questions and approvals
 
@@ -209,6 +240,38 @@ branch. A message to a sub-agent whose worktree was removed brings it back from
 the branch at the same path, so its session can continue. A folder that is not
 in a git repository, or has no commits, cannot have worktrees: the tool call
 fails with that reason.
+
+### Routines
+
+A routine (`routines` table) sends a bot (main or project) a message on a
+schedule: daily at a time on chosen weekdays, every N minutes (15 to a week),
+or once. Times are the computer's local time. `CodeBot.runDueRoutines` runs
+every 30 seconds (`routineTickMs`) and starts each due routine once: a
+`routine.run` event in the bot's conversation, then a turn like a typed message
+(`Inbound.kind = "routine"`, framed by `prompts.fromRoutine`, replies to the
+user). Its next run is then planned: interval routines keep their rhythm from
+the planned time, daily ones take the next chosen day, once routines are
+switched off. Runs missed while code-bot was closed happen once at start-up.
+The window lists the next routines in the sidebar and manages them in the
+Routines dialog. Bots cannot create routines: they have no tools that change
+code-bot itself.
+
+### Usage
+
+- **Plan limits.** `Engine.usage()` reads the signed-in plan's windows without
+  model usage: Claude Code through the Agent SDK's experimental `/usage`
+  control request (a Claude Code process started without a prompt; about 2
+  seconds), Codex through `account/rateLimits/read` on `codex app-server`.
+  `CodeBot.checkUsage` asks every engine in use (Claude Code for the bots, and
+  each project's sub-agent engine), keeps the answer and sends an `app`
+  `usage` event: 3 seconds after start, every 10 minutes, and after work ends
+  (at most every 2 minutes). Failures become a `note`, never an error.
+- **What bots and sub-agents used.** Claude Code reports a cost estimate for
+  the whole session with every result, also after a resume (checked
+  2026-11-26), so a bot's cost is the latest value per conversation
+  (`threads.cost_usd`) summed over its conversations, and a sub-agent's is
+  `tasks.cost_usd`. Codex reports tokens, not money: `tasks.tokens`.
+  `BotStatus.usage` adds them up.
 
 ### Archive and retention
 
@@ -335,8 +398,9 @@ SQLite file `code-bot.db` in the app's data folder (`<userData>/data`;
 `CODE_BOT_USER_DATA` overrides `userData`). Tables:
 
 - `bots`: settings of every bot; archived bots keep their row (`archived_at`).
-- `threads`: one row per conversation, with the bot's model session id.
-- `tasks`: one row per sub-agent (with its worktree as JSON, limits, `archived_at`).
+- `threads`: one row per conversation, with the bot's model session id and its cost so far.
+- `tasks`: one row per sub-agent (with its worktree as JSON, limits, role, the developer it checks, tokens, `archived_at`).
+- `routines`: scheduled messages to bots, with their next and last run.
 - `events`: the history of every thread and task, keyed by (`owner_id`, `seq`).
 - `requests`: open questions and approvals, so they survive a restart.
 - `settings`: the app settings, one JSON value per key.
@@ -382,6 +446,27 @@ cut. The event names and shapes are a public contract; they are listed in
 - Agent output is rendered with `react-markdown` and `remark-gfm`, with raw
   HTML skipped, remote images replaced by their alt text, web links opened in
   the default browser, and sub-agent ids (`t_…`) turned into buttons.
+- The three panes are resizable: drag the handles between them (or focus one
+  and use the arrow keys; double-click resets). Widths are kept in the
+  window's `localStorage`; the conversation keeps at least 380 px.
+- Who is working: a spinning ring and a working badge on bots in the sidebar,
+  a strip above the message box (in the main bot's conversation the project
+  bots at work, in a project bot's its working sub-agents), a "thinking"
+  line while a bot replies, and spinners on running sub-agents. The main bot's
+  side panel lists the project bots and what each is doing (`Team.tsx`), not
+  their sub-agents.
+- Approvals are laid out per tool (`RequestDetails.tsx`): a plan as Markdown,
+  a command as code, an edit as a diff, a file to write with its content,
+  Codex patches as diffs, anything else as labelled fields. A card shows
+  "Sending…" and then what was sent at once, and an answered question keeps its
+  answer (`ClosedData.answers`). Coming back to the window re-reads open
+  requests, bots and routines in case an event was missed.
+- The sidebar shows the plan limits (`Usage.tsx`), the next routines, and an
+  "Update to …" button when a newer release is out; Settings has the full
+  limits and an Updates section.
+- The taskbar (Windows), dock (macOS) or launcher (Linux) icon shows how many
+  questions and approvals wait (`badge.ts`), and the taskbar button flashes
+  when one arrives while the window is not focused.
 
 ## Security model
 
@@ -397,6 +482,9 @@ cut. The event names and shapes are a public contract; they are listed in
   arguments passed as a list (no shell), in a folder code-bot chose.
 - Worktrees are created and removed by code-bot itself when a project is set to
   isolate sub-agents, never on a bot's request; the bots' `git` stays read-only.
+- Updates come only from the GitHub releases of kggayo/code-bot over HTTPS. The
+  installer is checked against the size and SHA-256 digest GitHub lists for the
+  asset before it runs, and only when the user asked for the update.
 - Bots cannot change files or run commands; project bots read only their own
   folders, and git is limited to read-only subcommands with arguments that write
   or run programs refused (`src/core/git.ts`).

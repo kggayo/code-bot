@@ -35,6 +35,13 @@ in the status table in `AGENTS.md`; the reasoning is in `docs/decisions.md`
 - **Merging from the app.** Today a sub-agent's branch is handed over or merged
   by another sub-agent; a "merge into the project folder" button for the user
   is a possible addition.
+- **Routines from a conversation.** Routines are set up in the window
+  (decision 30). Letting the main bot create one when asked ("every morning,
+  check …") needs a tool that changes code-bot's own settings, which bots do not
+  have today; decide on that rule first.
+- **Updating in place on Linux.** The update button opens the release page on
+  Linux (decision 31). Replacing the running AppImage (`$APPIMAGE`) with the new
+  one and restarting is possible but untested.
 
 ## Milestone 2: the main bot on the Azure VM, reachable over an API or MCP
 

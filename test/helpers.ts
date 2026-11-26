@@ -76,6 +76,8 @@ export function setup(t: TestContext, options: { questionTimeoutMs?: number } = 
     worktreeDir: join(dir, 'worktrees'),
     questionTimeoutMs: options.questionTimeoutMs,
     retentionIntervalMs: 0,
+    usageIntervalMs: 0,
+    routineTickMs: 0,
   });
   const events: CoreEvent[] = [];
   core.subscribe((event) => events.push(event));

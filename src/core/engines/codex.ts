@@ -51,7 +51,9 @@ import type {
   EngineEvent,
   EngineRun,
   EngineRunOptions,
+  EngineUsageReport,
   TerminalCommand,
+  UsageWindow,
   UserRequest,
   UserResponse,
 } from './types.ts';
@@ -607,6 +609,8 @@ class CodexRun implements EngineRun {
   private stopping = false;
   private finished = false;
   private limit: 'turns' | undefined;
+  /** Tokens the thread has used so far (thread/tokenUsage/updated reports the running total). */
+  private tokens: number | undefined;
   private forceKill: ReturnType<typeof setTimeout> | undefined;
 
   constructor(launcher: Launcher | string, options: EngineRunOptions, askUser: AskUser) {
@@ -801,7 +805,7 @@ class CodexRun implements EngineRun {
     const summary = records(completed.items).filter((item) => item.type === 'agentMessage');
     const text = turn.finalText || turn.lastText || str(summary[summary.length - 1]?.text);
     const durationMs = typeof completed.durationMs === 'number' ? completed.durationMs : Date.now() - turn.startedAt;
-    const result = { type: 'result' as const, text, durationMs, numTurns: turn.modelCalls };
+    const result = { type: 'result' as const, text, durationMs, numTurns: turn.modelCalls, tokens: this.tokens };
     if (status === 'completed') return { ...result, ok: true };
     if (status === 'interrupted') {
       return this.limit
@@ -927,6 +931,9 @@ class CodexRun implements EngineRun {
         return;
       case 'thread/tokenUsage/updated':
         // One per model call. A resumed thread also reports its earlier usage, outside any turn.
+        if (isRecord(params.tokenUsage) && isRecord(params.tokenUsage.total) && typeof params.tokenUsage.total.totalTokens === 'number') {
+          this.tokens = params.tokenUsage.total.totalTokens;
+        }
         if (turn?.id && params.turnId === turn.id) this.countModelCall(turn);
         return;
       case 'error':
@@ -1233,6 +1240,43 @@ export interface CodexModel {
   efforts: string[];
 }
 
+/** "5-hour window", "Week", "30-day window": a limit window by its length. */
+function windowLabel(minutes: number | null, fallback: string): string {
+  if (!minutes || minutes <= 0) return fallback;
+  if (minutes === 10_080) return 'Week';
+  if (minutes % 1440 === 0) return `${minutes / 1440}-day window`;
+  if (minutes % 60 === 0) return `${minutes / 60}-hour window`;
+  return `${minutes}-minute window`;
+}
+
+/** The limit windows of an account/rateLimits/read answer. */
+export function codexUsage(answer: Json): EngineUsageReport {
+  const snapshot = isRecord(answer.rateLimits) ? answer.rateLimits : {};
+  const windows: UsageWindow[] = [];
+  for (const [key, fallback] of [
+    ['primary', 'Main window'],
+    ['secondary', 'Second window'],
+  ] as const) {
+    const window = snapshot[key];
+    if (!isRecord(window)) continue;
+    const minutes = typeof window.windowDurationMins === 'number' ? window.windowDurationMins : null;
+    windows.push({
+      id: key,
+      label: windowLabel(minutes, fallback),
+      usedPercent: typeof window.usedPercent === 'number' ? window.usedPercent : null,
+      resetsAt: typeof window.resetsAt === 'number' ? new Date(window.resetsAt * 1000).toISOString() : null,
+      severity: null,
+    });
+  }
+  const plan = str(snapshot.planType) || null;
+  const blocked = answer.ordinaryUsageAllowed === false;
+  return {
+    plan,
+    windows,
+    note: blocked ? 'Codex says the plan limit is reached.' : windows.length ? null : 'Codex reported no limits for this account.',
+  };
+}
+
 export class CodexEngine implements Engine {
   readonly id = 'codex';
   readonly label = 'Codex';
@@ -1287,26 +1331,7 @@ export class CodexEngine implements Engine {
 
   /** The models this Codex offers (model/list). Uses no model usage. */
   async models(): Promise<CodexModel[]> {
-    const launcher = this.locate();
-    if (typeof launcher === 'string') throw new Error(launcher);
-    const child = launch(launcher, ['app-server'], ['pipe', 'pipe', 'ignore']);
-    const rpc = new RpcConnection(child);
-    const lines = createInterface({ input: child.stdout! });
-    lines.on('line', (line) => rpc.handle(line));
-    const exited = new Promise<void>((resolve) => {
-      child.once('error', (error) => {
-        rpc.close(error);
-        resolve();
-      });
-      child.once('exit', () => {
-        rpc.close(new Error('Codex exited before listing its models.'));
-        resolve();
-      });
-    });
-    const timer = setTimeout(() => killTree(child), CHECK_TIMEOUT_MS);
-    try {
-      await rpc.request('initialize', { clientInfo: CLIENT_INFO, capabilities: { experimentalApi: false, requestAttestation: false } });
-      rpc.notify('initialized');
+    return this.ask('listing its models', async (rpc) => {
       const models: CodexModel[] = [];
       let cursor: string | undefined;
       do {
@@ -1324,6 +1349,44 @@ export class CodexEngine implements Engine {
         cursor = str(page.nextCursor) || undefined;
       } while (cursor);
       return models;
+    });
+  }
+
+  /** The ChatGPT plan's limit windows (account/rateLimits/read). Uses no model usage. */
+  async usage(): Promise<EngineUsageReport> {
+    try {
+      const answer = await this.ask('reading its limits', (rpc) =>
+        rpc.request('account/rateLimits/read', { excludeResetCreditDetails: true }),
+      );
+      return codexUsage(answer);
+    } catch (error) {
+      return { plan: null, windows: [], note: `Could not read the plan limits: ${errorMessage(error)}` };
+    }
+  }
+
+  /** Starts `codex app-server`, initializes it, runs one exchange and stops it. */
+  private async ask<T>(what: string, exchange: (rpc: RpcConnection) => Promise<T>): Promise<T> {
+    const launcher = this.locate();
+    if (typeof launcher === 'string') throw new Error(launcher);
+    const child = launch(launcher, ['app-server'], ['pipe', 'pipe', 'ignore']);
+    const rpc = new RpcConnection(child);
+    const lines = createInterface({ input: child.stdout! });
+    lines.on('line', (line) => rpc.handle(line));
+    const exited = new Promise<void>((resolve) => {
+      child.once('error', (error) => {
+        rpc.close(error);
+        resolve();
+      });
+      child.once('exit', () => {
+        rpc.close(new Error(`Codex exited before ${what}.`));
+        resolve();
+      });
+    });
+    const timer = setTimeout(() => killTree(child), CHECK_TIMEOUT_MS);
+    try {
+      await rpc.request('initialize', { clientInfo: CLIENT_INFO, capabilities: { experimentalApi: false, requestAttestation: false } });
+      rpc.notify('initialized');
+      return await exchange(rpc);
     } finally {
       clearTimeout(timer);
       child.stdin?.end();

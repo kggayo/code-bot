@@ -33,6 +33,14 @@ export type Isolation = (typeof ISOLATIONS)[number];
 /** Files copied into new worktrees unless the project says otherwise: local settings git does not track. */
 export const DEFAULT_WORKTREE_FILES: readonly string[] = ['.env', '.env.*'];
 
+/**
+ * What a sub-agent is for. One piece of work (a ticket) has one developer, from
+ * investigation to fix; QA and reviewers check that developer's work and their
+ * findings go back to it.
+ */
+export const SUBAGENT_ROLES = ['developer', 'qa', 'reviewer', 'other'] as const;
+export type SubagentRole = (typeof SUBAGENT_ROLES)[number];
+
 /** Defaults for the sub-agents a project bot starts. */
 export interface SubagentDefaults {
   engine: string;
@@ -81,6 +89,23 @@ export interface BotStatus {
   activeSubagents: number;
   /** Questions and approvals waiting for the user in this bot's conversation. */
   needsYou: number;
+  /** What the bot and its sub-agents have used so far. */
+  usage: BotUsage;
+}
+
+/**
+ * Model usage so far, as the engines estimate it (US dollars at API prices; on
+ * a subscription nothing is billed per call, but it shows what used the most).
+ */
+export interface BotUsage {
+  /** The bot's own conversations. */
+  botUsd: number;
+  /** For the main bot: every project bot's own conversations. 0 for project bots. */
+  projectBotsUsd: number;
+  /** Its sub-agents (for the main bot: every project's), archived ones included. */
+  subagentsUsd: number;
+  /** Tokens of sub-agents whose engine reports tokens instead of money (Codex). */
+  subagentTokens: number;
 }
 
 export interface BotView extends Bot {
@@ -135,6 +160,10 @@ export interface Task {
   state: TaskState;
   /** Who asked the project bot for this work; reports go back to them. */
   requestedBy: Requester;
+  /** What it is for. Sub-agents from before roles existed are developers. */
+  role: SubagentRole;
+  /** For QA and reviewers: the developer sub-agent whose work this one checks. */
+  forTaskId: string | null;
   engine: string;
   model: string | null;
   effort: string | null;
@@ -149,6 +178,8 @@ export interface Task {
   error: string | null;
   /** The engine's estimate for the whole session, in US dollars. */
   costUsd: number;
+  /** Tokens used by the whole session, for engines that report tokens instead of money (Codex). 0 otherwise. */
+  tokens: number;
   /** Turn limit per run, from the project's settings when it started. */
   maxTurns: number | null;
   /** Budget for the whole sub-agent, from the project's settings when it started. */
@@ -234,6 +265,19 @@ export interface ClosedData {
   decision: 'allow' | 'deny' | 'withdrawn';
   /** user: answered by the user. bot: answered by the project bot. system: the sub-agent stopped first. */
   by: 'user' | 'bot' | 'system';
+  /** For answered questions: each question's text and the answer given. */
+  answers?: Record<string, string>;
+  /** For declined requests: the note that went with it, if any. */
+  message?: string;
+}
+
+/** data of a "routine.run" thread event: a routine started a turn in this conversation. */
+export interface RoutineRunData {
+  routineId: string;
+  title: string;
+  text: string;
+  /** true when it was started by hand ("Run now"), not by its schedule. */
+  manual: boolean;
 }
 
 /** data of a "turn.end" thread event. */
@@ -302,6 +346,95 @@ export interface TaskView {
   events: CoreEvent[];
 }
 
+/** One limit window of a coding agent's plan, such as the 5-hour session or the week. */
+export interface UsageWindow {
+  /** Stable key, e.g. "session", "weekly_all", "weekly_opus", "primary". */
+  id: string;
+  /** For people, e.g. "5-hour session" or "Week · Opus". */
+  label: string;
+  /** Share of the window used, 0-100. null when the agent did not say. */
+  usedPercent: number | null;
+  /** When the window resets (ISO time). */
+  resetsAt: string | null;
+  /** The agent's own reading of it, when it gives one. */
+  severity: 'normal' | 'warning' | 'critical' | null;
+}
+
+/** How much of a coding agent's plan limits is used, as the agent reports it. Uses no model usage to find out. */
+export interface EngineUsage {
+  engineId: string;
+  label: string;
+  /** The plan, e.g. "max" or "plus", when known. */
+  plan: string | null;
+  windows: UsageWindow[];
+  /** Why there are no windows (an API key has no plan limits), or what went wrong. */
+  note: string | null;
+  checkedAt: string;
+}
+
+/**
+ * When a routine runs, in the computer's local time.
+ * once      at one moment
+ * daily     at a time of day, on the chosen weekdays (0 = Sunday … 6 = Saturday)
+ * interval  every so many minutes (at least 15) from when it was set up
+ */
+export type RoutineSchedule =
+  | { kind: 'once'; at: string }
+  | { kind: 'daily'; time: string; days: number[] }
+  | { kind: 'interval'; minutes: number };
+
+/** A message sent to a bot on a schedule, as if the user typed it. */
+export interface Routine {
+  id: string;
+  /** The main bot or a project bot. */
+  botId: string;
+  title: string;
+  /** What the bot is told each time. */
+  prompt: string;
+  schedule: RoutineSchedule;
+  enabled: boolean;
+  /** null when it will not run again (a "once" routine that ran, or a disabled one). */
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  /** Why the last run could not start, if it could not. */
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RoutineInput {
+  botId: string;
+  title: string;
+  prompt: string;
+  schedule: RoutineSchedule;
+  enabled: boolean;
+}
+
+export type RoutinePatch = Partial<RoutineInput>;
+
+/** Whether a newer code-bot has been released, and how it can be installed here. */
+export interface UpdateInfo {
+  current: string;
+  /** The newest released version, once checked. */
+  latest: string | null;
+  available: boolean;
+  /**
+   * installer  code-bot can download the new installer and start it (installed Windows app)
+   * manual     the release page is opened; download and install by hand (portable zip, Linux, macOS, running from source)
+   */
+  method: 'installer' | 'manual';
+  /** Why it is manual here, for people. */
+  methodNote: string | null;
+  /** The release page. */
+  url: string | null;
+  /** Release notes (Markdown). */
+  notes: string | null;
+  checkedAt: string | null;
+  /** Set while the installer downloads: 0-100. */
+  downloadPercent: number | null;
+  error: string | null;
+}
+
 export interface AppInfo {
   version: string;
   dataDir: string;
@@ -354,6 +487,17 @@ export interface CodeBotApi {
   setTaskArchived(taskId: string, archived: boolean, options?: { discardChanges?: boolean }): Promise<void>;
   listRequests(): Promise<PendingRequest[]>;
   respond(taskId: string, requestId: string, response: UserResponse): Promise<void>;
+  /** The coding agents' plan limits, as last checked (checks when never checked). */
+  getUsage(): Promise<EngineUsage[]>;
+  /** Checks the coding agents' plan limits now. */
+  checkUsage(): Promise<EngineUsage[]>;
+  /** Every routine, soonest first. */
+  listRoutines(): Promise<Routine[]>;
+  createRoutine(input: RoutineInput): Promise<Routine>;
+  updateRoutine(routineId: string, patch: RoutinePatch): Promise<Routine>;
+  deleteRoutine(routineId: string): Promise<void>;
+  /** Runs a routine now, without changing its schedule. */
+  runRoutine(routineId: string): Promise<void>;
   checkFolders(paths: string[]): Promise<FolderCheck[]>;
   /** Desktop only: native folder picker. Empty when cancelled. */
   pickFolders(): Promise<string[]>;
@@ -367,6 +511,15 @@ export interface CodeBotApi {
   signIn(engineId: string): Promise<void>;
   /** Desktop only: opens a terminal that continues a stopped sub-agent's session interactively. */
   openInTerminal(taskId: string): Promise<void>;
+  /** Desktop only: what the last update check found. */
+  getUpdate(): Promise<UpdateInfo>;
+  /** Desktop only: asks GitHub for the newest release. */
+  checkForUpdate(): Promise<UpdateInfo>;
+  /**
+   * Desktop only: installs the newest release. With method "installer" it downloads the
+   * installer, starts it and quits code-bot; with "manual" it opens the release page.
+   */
+  installUpdate(): Promise<void>;
 }
 
 export type CodeBotMethod = keyof CodeBotApi;

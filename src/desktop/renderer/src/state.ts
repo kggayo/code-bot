@@ -9,12 +9,17 @@ import type {
   BotView,
   CoreEvent,
   EngineInfo,
+  EngineUsage,
   PendingRequest,
+  Routine,
+  RoutineInput,
+  RoutinePatch,
   SurfacedData,
   Task,
   TaskState,
   TaskWorktree,
   ThreadView,
+  UpdateInfo,
   UserResponse,
 } from '../../../shared/types.ts';
 import { api } from './api.ts';
@@ -52,6 +57,15 @@ class AppState {
   engines: EngineInfo[] = [];
   checkingEngines = false;
   appSettingsOpen = false;
+  /** The coding agents' plan limits; empty until read. */
+  usage: EngineUsage[] = [];
+  checkingUsage = false;
+  /** Every routine, soonest first. */
+  routines: Routine[] = [];
+  /** The routines dialog, opened on one bot's routines or on all of them. */
+  routinesOpen: { botId: string | null } | null = null;
+  /** Whether a newer code-bot is out. */
+  update: UpdateInfo | null = null;
   /** An earlier conversation the user is reading (read-only until reopened). */
   viewing: { botId: string; view: ThreadView } | null = null;
   /** Bumped when a bot's list of conversations changes. */
@@ -94,15 +108,26 @@ class AppState {
     try {
       window.codeBot.onEvent((event) => this.apply(event));
       window.codeBot.onFocusBot((botId) => this.select(botId));
-      const [info, settings, bots, tasks, requests] = await Promise.all([
+      const [info, settings, bots, tasks, requests, routines, update] = await Promise.all([
         api.appInfo(),
         api.getSettings(),
         api.listBots(),
         api.listTasks({ limit: MAX_TASKS }),
         api.listRequests(),
+        api.listRoutines(),
+        api.getUpdate(),
       ]);
-      Object.assign(this, { info, settings, bots, tasks, requests, ready: true });
+      Object.assign(this, { info, settings, bots, tasks, requests, routines, update, ready: true });
       void this.checkEngines();
+      void api
+        .getUsage()
+        .then((usage) => {
+          this.usage = usage;
+          this.changed();
+        })
+        .catch(() => undefined);
+      // Coming back to the window re-reads what may have been missed meanwhile.
+      window.addEventListener('focus', () => this.later('resync', this.resync, 50));
       await this.loadConversation(this.selectedBotId);
     } catch (error) {
       this.fatal = error instanceof Error ? error.message : String(error);
@@ -139,6 +164,11 @@ class AppState {
 
   openAppSettings(open: boolean): void {
     this.appSettingsOpen = open;
+    this.changed(true);
+  }
+
+  openRoutines(open: { botId: string | null } | null): void {
+    this.routinesOpen = open;
     this.changed(true);
   }
 
@@ -199,6 +229,37 @@ class AppState {
       this.checkingEngines = false;
       this.changed();
     }
+  }
+
+  async checkUsage(): Promise<void> {
+    this.checkingUsage = true;
+    this.changed();
+    try {
+      this.usage = await api.checkUsage();
+    } catch {
+      // Keep the last reading.
+    } finally {
+      this.checkingUsage = false;
+      this.changed();
+    }
+  }
+
+  async createRoutine(input: RoutineInput): Promise<void> {
+    await api.createRoutine(input);
+    this.routines = await api.listRoutines();
+    this.changed();
+  }
+
+  async updateRoutine(routineId: string, patch: RoutinePatch): Promise<void> {
+    await api.updateRoutine(routineId, patch);
+    this.routines = await api.listRoutines();
+    this.changed();
+  }
+
+  async deleteRoutine(routineId: string): Promise<void> {
+    await api.deleteRoutine(routineId);
+    this.routines = await api.listRoutines();
+    this.changed();
   }
 
   async setTaskArchived(taskId: string, archived: boolean, discardChanges = false): Promise<void> {
@@ -269,6 +330,14 @@ class AppState {
       this.changed();
     });
 
+  /** Re-reads open requests and bot statuses, in case an event was missed. */
+  private resync = () =>
+    Promise.all([api.listRequests(), api.listBots(), api.listRoutines()]).then(([requests, bots, routines]) => {
+      Object.assign(this, { requests, bots, routines });
+      this.updateTitle();
+      this.changed();
+    });
+
   private later(key: string, run: () => Promise<unknown>, ms = 120): void {
     if (this.timers.has(key)) return;
     this.timers.set(
@@ -286,6 +355,9 @@ class AppState {
     if (event.scope === 'app') {
       if (event.type === 'settings') this.settings = event.data as AppSettings;
       if (event.type === 'engines') this.engines = event.data as EngineInfo[];
+      if (event.type === 'usage') this.usage = event.data as EngineUsage[];
+      if (event.type === 'routines') this.routines = event.data as Routine[];
+      if (event.type === 'update') this.update = event.data as UpdateInfo;
       this.changed();
       return;
     }
@@ -351,6 +423,11 @@ class AppState {
     if (event.type === 'text' || event.type === 'result') log.live = '';
     if (event.type === 'state') log.task = { ...log.task, state: (event.data as { state: TaskState }).state };
     if (event.type === 'worktree') log.task = { ...log.task, worktree: (event.data as { worktree: TaskWorktree | null }).worktree };
+    if (event.type === 'settings') log.task = { ...log.task, ...(event.data as Partial<Task>) };
+    if (event.type === 'result') {
+      const { costUsd, tokens } = event.data as { costUsd?: number; tokens?: number };
+      log.task = { ...log.task, costUsd: costUsd ?? log.task.costUsd, tokens: tokens ?? log.task.tokens };
+    }
     if (event.type === 'archived' || event.type === 'unarchived') {
       log.task = { ...log.task, archivedAt: (event.data as { archivedAt: string | null }).archivedAt };
     }
@@ -384,6 +461,8 @@ class AppState {
       case 'archived':
       case 'unarchived':
       case 'worktree':
+      case 'settings':
+      case 'result':
         this.later('tasks', this.refreshTasks, 200);
         break;
       case 'deleted':

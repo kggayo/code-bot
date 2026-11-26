@@ -1,12 +1,60 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { BotView, ClosedData, CoreEvent, InboundData, SurfacedData, TurnEndData } from '../../../../shared/types.ts';
+import { ACTIVE_STATES } from '../../../../shared/types.ts';
+import type {
+  BotView,
+  ClosedData,
+  CoreEvent,
+  InboundData,
+  RoutineRunData,
+  SurfacedData,
+  TurnEndData,
+} from '../../../../shared/types.ts';
 import { api } from '../api.ts';
-import { basename, describeTool } from '../format.ts';
+import { ROLE_LABEL, basename, describeTool } from '../format.ts';
 import { useAppState } from '../state.ts';
 import { Composer } from './Composer.tsx';
 import { ConversationMenu } from './ConversationMenu.tsx';
 import { RequestCard } from './RequestCard.tsx';
+import { activity } from './Team.tsx';
 import { MarkdownText, RichText, TaskChip } from './Text.tsx';
+
+/**
+ * Who is working right now, above the message box. In the main bot's
+ * conversation: the project bots; in a project bot's: its sub-agents.
+ */
+function ActivityBar({ bot }: { bot: BotView }) {
+  const app = useAppState();
+  if (bot.kind === 'main') {
+    const working = app.bots.filter((candidate) => candidate.kind === 'project' && activity(candidate).working);
+    if (working.length === 0) return null;
+    return (
+      <div className="activity-bar" data-testid="activity-bar" aria-live="polite">
+        <span className="activity-label">Working on it</span>
+        {working.map((project) => (
+          <button key={project.id} type="button" className="activity-item" onClick={() => app.select(project.id)}>
+            <span className="spinner" aria-hidden="true" />
+            <strong>{project.name}</strong> <span className="muted">{activity(project).text}</span>
+          </button>
+        ))}
+      </div>
+    );
+  }
+  const running = app.tasks.filter((task) => task.botId === bot.id && ACTIVE_STATES.includes(task.state));
+  if (running.length === 0) return null;
+  return (
+    <div className="activity-bar" data-testid="activity-bar" aria-live="polite">
+      <span className="activity-label">{running.length === 1 ? '1 sub-agent working' : `${running.length} sub-agents working`}</span>
+      {running.map((task) => (
+        <button key={task.id} type="button" className="activity-item" onClick={() => app.openTask(task.id)} title={task.title}>
+          {task.state === 'waiting' ? <span className="dot waiting" aria-hidden="true" /> : <span className="spinner" aria-hidden="true" />}
+          {task.role !== 'developer' && <span className="role-tag">{ROLE_LABEL[task.role]}</span>}
+          <span className="activity-title">{task.title}</span>
+          {task.state === 'waiting' && <span className="muted"> · needs an answer</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 /** Keeps a log scrolled to the bottom while new content arrives, unless the reader scrolled up. */
 export function useStickToBottom(dependency: unknown) {
@@ -78,6 +126,18 @@ const ThreadItem = memo(function ThreadItem({
           Started sub-agent <TaskChip id={String(data.taskId)} /> {String(data.title)}
         </div>
       );
+    case 'routine.run': {
+      const run = data as unknown as RoutineRunData;
+      return (
+        <div className="msg routine" data-testid="routine-run">
+          <div className="msg-label">
+            Routine · {run.title}
+            {run.manual ? ' (run by hand)' : ''}
+          </div>
+          <div className="routine-text">{run.text}</div>
+        </div>
+      );
+    }
     case 'request.surfaced': {
       const surfaced = data as unknown as SurfacedData;
       return (
@@ -166,6 +226,7 @@ export function Conversation({ bot }: { bot: BotView }) {
     bot.kind === 'main'
       ? 'Your manager: routes requests to project bots and reports back'
       : bot.folders.map((folder) => basename(folder)).join(' · ');
+  const routines = app.routines.filter((routine) => routine.botId === bot.id);
 
   return (
     <section className="conversation" aria-label={`Conversation with ${bot.name}`}>
@@ -188,6 +249,14 @@ export function Conversation({ bot }: { bot: BotView }) {
           </span>
           <button type="button" onClick={() => void app.newConversation(bot.id)} title="Start a fresh conversation; sub-agents keep working">
             New conversation
+          </button>
+          <button
+            type="button"
+            data-testid="bot-routines"
+            onClick={() => app.openRoutines({ botId: bot.id })}
+            title={`Messages sent to ${bot.name} on a schedule`}
+          >
+            Routines{routines.length > 0 ? ` (${routines.length})` : ''}
           </button>
           <button type="button" onClick={() => app.openEditor({ mode: 'edit', botId: bot.id })}>
             Settings
@@ -220,11 +289,12 @@ export function Conversation({ bot }: { bot: BotView }) {
           </div>
         )}
         {!viewing && bot.status.busy && !conversation?.live && (
-          <div className="typing" aria-live="polite">
-            <span className="spinner" /> {bot.name} is working…
+          <div className="typing" aria-live="polite" data-testid="typing">
+            <span className="spinner" /> {bot.name} is thinking…
           </div>
         )}
       </div>
+      {!viewing && <ActivityBar bot={bot} />}
       {!viewing && (
         <Composer
         testId="composer"

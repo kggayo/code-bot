@@ -142,9 +142,45 @@ textarea {
 
 .app {
   display: grid;
-  grid-template-columns: 250px minmax(0, 1fr) 340px;
+  /* Sidebar, handle, conversation, handle, panel; App sets --left and --right as they are dragged. */
+  grid-template-columns: var(--left, 250px) 0 minmax(0, 1fr) 0 var(--right, 340px);
   height: 100vh;
   overflow: hidden;
+}
+.resizer {
+  position: relative;
+  z-index: 6;
+  width: 0;
+  outline: none;
+}
+.resizer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+  cursor: col-resize;
+}
+.resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -1px;
+  width: 2px;
+  background: transparent;
+  transition: background 0.12s;
+  pointer-events: none;
+}
+.resizer:hover::after,
+.resizer:focus-visible::after,
+body.resizing .resizer:active::after {
+  background: var(--accent);
+}
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 .starting,
 .fatal {
@@ -999,4 +1035,445 @@ textarea {
 }
 .field-row.top {
   align-items: flex-start;
+}
+
+/* ---- activity: who is working -------------------------------------------------- */
+
+.spinner.tiny {
+  width: 9px;
+  height: 9px;
+  border-width: 1.5px;
+  vertical-align: -1px;
+  margin-right: 3px;
+}
+.badge.working {
+  display: inline-flex;
+  align-items: center;
+}
+.avatar {
+  position: relative;
+}
+.avatar-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: 10px;
+  border: 2px solid transparent;
+  border-top-color: var(--running);
+  border-right-color: var(--running);
+  animation: spin 1.4s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .avatar-ring {
+    animation: none;
+    border-color: var(--running);
+  }
+}
+.state {
+  display: inline-flex;
+  align-items: center;
+}
+.activity-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 7px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 12.5px;
+  max-height: 96px;
+  overflow-y: auto;
+}
+.activity-label {
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
+.activity-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 9px;
+  border-radius: 12px;
+  background: var(--surface);
+  font-size: 12.5px;
+}
+.activity-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 320px;
+}
+.dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+.dot.waiting {
+  background: var(--waiting);
+}
+.role-tag {
+  display: inline-block;
+  margin-right: 5px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  vertical-align: 1px;
+}
+
+/* ---- the main bot's panel: project bots ---------------------------------------- */
+
+.team-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+  overflow-y: auto;
+}
+.team-item {
+  width: 100%;
+  display: grid;
+  gap: 3px;
+  text-align: left;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.team-item.working {
+  border-color: var(--running);
+}
+.team-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.team-name {
+  font-weight: 600;
+}
+.team-activity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.team-activity.working {
+  color: var(--running);
+}
+.panel-foot,
+.panel-usage {
+  margin: 0;
+  padding: 8px 14px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.panel-foot {
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+}
+.panel-usage {
+  border-bottom: 1px solid var(--border);
+}
+
+/* ---- routines ------------------------------------------------------------------ */
+
+.section-label.with-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+button.link.small {
+  font-size: 11.5px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+}
+.upcoming {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.upcoming-item {
+  width: 100%;
+  display: grid;
+  gap: 0;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 5px 8px;
+  border-radius: 7px;
+}
+.upcoming-item:hover:not(:disabled) {
+  background: var(--sidebar-hover);
+}
+.upcoming-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.upcoming-when,
+.upcoming-bot {
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.msg.routine {
+  align-self: flex-end;
+  background: var(--accent-soft);
+  border-color: transparent;
+}
+.routine-text {
+  white-space: pre-wrap;
+}
+.dialog.wide {
+  width: min(760px, calc(100vw - 40px));
+}
+.dialog-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.routine-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.routine-list li {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.routine-list li.paused {
+  opacity: 0.7;
+}
+.routine-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.routine-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.routine-prompt {
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 60px;
+  overflow: hidden;
+}
+.routine-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: flex-end;
+  max-width: 220px;
+}
+.routine-form {
+  display: grid;
+  gap: 12px;
+}
+.day-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+/* ---- plan limits and updates --------------------------------------------------- */
+
+.usage {
+  display: grid;
+  gap: 8px;
+}
+.usage.compact {
+  margin: 8px 0 4px;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--sidebar-hover);
+  gap: 6px;
+  font-size: 12px;
+}
+.usage-engine {
+  display: grid;
+  gap: 5px;
+}
+.usage-head {
+  font-size: 12.5px;
+}
+.usage-window {
+  display: grid;
+  gap: 2px;
+}
+.usage-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+.usage-percent {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.usage-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.usage-bar > span {
+  display: block;
+  height: 100%;
+  width: var(--used, 0%);
+  border-radius: 3px;
+  background: var(--running);
+  transition: width 0.3s;
+}
+.usage-window[data-level='warning'] .usage-bar > span {
+  background: var(--waiting);
+}
+.usage-window[data-level='critical'] .usage-bar > span {
+  background: var(--failed);
+}
+.usage-window[data-level='critical'] .usage-percent {
+  color: var(--failed);
+}
+.usage-reset,
+.usage-note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+.usage-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+}
+.usage-foot button.link.small {
+  padding: 0;
+  font-size: 11px;
+}
+.update-pill {
+  margin: 4px 0;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+  text-align: left;
+}
+.release-notes {
+  font-size: 12.5px;
+}
+.release-notes summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+/* ---- readable approvals and answered questions --------------------------------- */
+
+.request-body {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.request-why {
+  margin: 0;
+  font-size: 13px;
+}
+.request-code {
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: var(--surface-2);
+  font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.request-code.diff .add {
+  color: var(--done);
+}
+.request-code.diff .del {
+  color: var(--failed);
+}
+.plan {
+  max-height: 420px;
+  overflow: auto;
+  padding: 8px 12px;
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+.fields {
+  display: grid;
+  gap: 4px;
+}
+.field {
+  display: flex;
+  gap: 8px;
+  font-size: 12.5px;
+  min-width: 0;
+}
+.field.block {
+  display: grid;
+  gap: 3px;
+}
+.field-label {
+  flex: none;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.field-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.field code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.95em;
+}
+.question.answered {
+  display: grid;
+  gap: 2px;
+}
+.question-text {
+  margin: 0;
+  font-weight: 600;
+}
+.answer {
+  margin: 0;
+  color: var(--done);
+  font-weight: 600;
+  white-space: pre-wrap;
+}
+.request-card.closed .request-code,
+.request-card.closed .plan {
+  max-height: 120px;
 }

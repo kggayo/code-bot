@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { homedir } from 'node:os';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { CanUseTool, EffortLevel, Options, PermissionMode } from '@anthropic-ai/claude-agent-sdk';
 import { InputQueue } from './claude-input.ts';
@@ -12,7 +13,9 @@ import type {
   EngineEvent,
   EngineRun,
   EngineRunOptions,
+  EngineUsageReport,
   TerminalCommand,
+  UsageWindow,
 } from './types.ts';
 
 const PERMISSION_MODES: readonly PermissionMode[] = [
@@ -78,6 +81,71 @@ function run(command: string, args: string[], timeoutMs: number): Promise<{ code
 }
 
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const USAGE_TIMEOUT_MS = 30_000;
+
+type Json = Record<string, unknown>;
+const isRecord = (value: unknown): value is Json => typeof value === 'object' && value !== null && !Array.isArray(value);
+const percent = (value: unknown): number | null => (typeof value === 'number' && Number.isFinite(value) ? value : null);
+const isoTime = (value: unknown): string | null => {
+  if (typeof value !== 'string' || !value) return null;
+  const time = new Date(value);
+  return Number.isNaN(time.getTime()) ? null : time.toISOString();
+};
+const severityOf = (value: unknown): UsageWindow['severity'] =>
+  value === 'normal' || value === 'warning' || value === 'critical' ? value : null;
+
+/** What a scoped usage row is for: a model or a surface, by its display name. */
+function scopeName(row: Json): string {
+  const scope = isRecord(row.scope) ? row.scope : undefined;
+  for (const part of [scope?.model, scope?.surface]) {
+    if (isRecord(part) && typeof part.display_name === 'string' && part.display_name) return part.display_name;
+  }
+  return '';
+}
+
+/** A label for one of the plan's usage rows. Rows are classified by their kind, never by the server's labels. */
+function limitLabel(row: Json): string {
+  const scoped = scopeName(row);
+  switch (row.kind) {
+    case 'session':
+      return '5-hour session';
+    case 'weekly_all':
+      return 'Week · all models';
+    case 'weekly_scoped':
+      return scoped ? `Week · ${scoped}` : 'Week · some models';
+    default: {
+      const words = String(row.kind ?? row.group ?? 'limit').replace(/_/g, ' ');
+      return scoped ? `${words} · ${scoped}` : words;
+    }
+  }
+}
+
+/** The plan's limit windows from Claude Code's /usage data, newest format first. */
+export function claudeUsageWindows(rateLimits: unknown): UsageWindow[] {
+  if (!isRecord(rateLimits)) return [];
+  if (Array.isArray(rateLimits.limits) && rateLimits.limits.length > 0) {
+    return rateLimits.limits.filter(isRecord).map((row) => {
+      return {
+        id: [String(row.kind ?? 'limit'), scopeName(row).toLowerCase()].filter(Boolean).join(':'),
+        label: limitLabel(row),
+        usedPercent: percent(row.percent),
+        resetsAt: isoTime(row.resets_at),
+        severity: severityOf(row.severity),
+      };
+    });
+  }
+  const named: [string, string][] = [
+    ['five_hour', '5-hour session'],
+    ['seven_day', 'Week · all models'],
+    ['seven_day_opus', 'Week · Opus'],
+    ['seven_day_sonnet', 'Week · Sonnet'],
+  ];
+  return named.flatMap(([key, label]) => {
+    const window = rateLimits[key];
+    if (!isRecord(window)) return [];
+    return [{ id: key, label, usedPercent: percent(window.utilization), resetsAt: isoTime(window.resets_at), severity: null }];
+  });
+}
 
 /**
  * Runs Claude Code through the Claude Agent SDK. Each run is its own Claude Code
@@ -128,6 +196,51 @@ export class ClaudeEngine implements Engine {
     const binary = this.binary();
     if (!binary || !SESSION_ID.test(sessionId)) return undefined;
     return { command: binary, args: ['--resume', sessionId] };
+  }
+
+  /**
+   * The plan's limits, as Claude Code's /usage shows them. Starts a Claude Code
+   * process without a prompt and asks it; no model usage. The SDK marks this
+   * call experimental, so any failure becomes a note instead of an error.
+   */
+  async usage(): Promise<EngineUsageReport> {
+    const input = new InputQueue();
+    const abortController = new AbortController();
+    const stream = query({
+      prompt: input,
+      options: {
+        cwd: homedir(),
+        settingSources: [],
+        tools: [],
+        strictMcpConfig: true,
+        permissionMode: 'dontAsk',
+        persistSession: false,
+        pathToClaudeCodeExecutable: this.executable,
+        abortController,
+        env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: CLIENT_APP },
+      },
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const answer = await Promise.race([
+        stream.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true }),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('Claude Code did not answer in time')), USAGE_TIMEOUT_MS);
+        }),
+      ]);
+      const plan = typeof answer.subscription_type === 'string' ? answer.subscription_type : null;
+      if (!answer.rate_limits_available || !answer.rate_limits) {
+        return { plan, windows: [], note: 'No plan limits: Claude Code is signed in with an API key or a cloud provider.' };
+      }
+      const windows = claudeUsageWindows(answer.rate_limits);
+      return { plan, windows, note: windows.length ? null : 'Claude Code reported no limits for this plan.' };
+    } catch (error) {
+      return { plan: null, windows: [], note: `Could not read the plan limits: ${error instanceof Error ? error.message : String(error)}` };
+    } finally {
+      clearTimeout(timer);
+      input.close();
+      abortController.abort();
+    }
   }
 
   start(options: EngineRunOptions, askUser: AskUser): EngineRun {

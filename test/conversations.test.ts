@@ -119,6 +119,8 @@ test('an approval left open when code-bot closed is put to the user again and re
     brain: new TestBrain(),
     workDir: join(dir, 'main-bot'),
     retentionIntervalMs: 0,
+    usageIntervalMs: 0,
+    routineTickMs: 0,
   });
   const [request] = again.listRequests();
   assert.equal(request?.held, true);

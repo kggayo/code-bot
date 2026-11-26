@@ -2,16 +2,17 @@ import { memo, useEffect, useMemo, useState } from 'react';
 import { ACTIVE_STATES } from '../../../../shared/types.ts';
 import type { BotView, ClosedData, CoreEvent, PendingRequest, Task } from '../../../../shared/types.ts';
 import { api } from '../api.ts';
-import { STATE_LABEL, ago, basename, describeAgentTool } from '../format.ts';
+import { ROLE_LABEL, STATE_LABEL, ago, basename, describeAgentTool, money, tokens, usageLine } from '../format.ts';
 import { useAppState } from '../state.ts';
 import { Composer } from './Composer.tsx';
 import { useStickToBottom } from './Conversation.tsx';
 import { RequestCard } from './RequestCard.tsx';
-import { MarkdownText } from './Text.tsx';
+import { MarkdownText, TaskChip } from './Text.tsx';
 
 function StatePill({ task }: { task: Task }) {
   return (
     <span className="state" data-state={task.state}>
+      {task.state === 'running' && <span className="spinner tiny" aria-hidden="true" />}
       {STATE_LABEL[task.state]}
     </span>
   );
@@ -21,8 +22,11 @@ function settings(task: Task): string {
   return [task.model ?? 'default model', task.effort ? `${task.effort} effort` : null].filter(Boolean).join(' · ');
 }
 
-function money(value: number): string {
-  return value >= 1 ? `$${value.toFixed(2)}` : `$${value.toFixed(3)}`;
+/** What the sub-agent used: the engine's cost estimate, or tokens for engines that report tokens. */
+function spent(task: Task): string {
+  if (task.costUsd > 0) return `${money(task.costUsd)} est.`;
+  if (task.tokens > 0) return tokens(task.tokens);
+  return '';
 }
 
 function TaskList({ tasks, showBot }: { tasks: Task[]; showBot: boolean }) {
@@ -36,12 +40,17 @@ function TaskList({ tasks, showBot }: { tasks: Task[]; showBot: boolean }) {
               <StatePill task={task} />
               <span className="task-when">{ago(task.updatedAt)}</span>
             </span>
-            <span className="task-title">{task.title}</span>
+            <span className="task-title">
+              {task.role !== 'developer' && <span className="role-tag">{ROLE_LABEL[task.role]}</span>}
+              {task.title}
+            </span>
             <span className="task-meta">
               {showBot && <span>{app.bot(task.botId)?.name ?? 'removed bot'}</span>}
               <span>{task.requestedBy === 'main' ? 'via main bot' : 'from you'}</span>
+              {task.forTaskId && <span>checks {task.forTaskId}</span>}
               <span>{settings(task)}</span>
               {task.worktree && <span title={task.worktree.branch}>own branch</span>}
+              {spent(task) && <span title="The agent's own estimate for its whole session">{spent(task)}</span>}
             </span>
           </button>
         </li>
@@ -75,12 +84,21 @@ export function SubagentList({ bot }: { bot: BotView }) {
     };
   }, [showArchived, bot.id, bot.kind, app.tasks]);
 
+  const used = usageLine(bot.status.usage, bot.kind === 'main');
   return (
     <div className="panel-body">
       <div className="panel-head">
         <h2>{showArchived ? 'Archived sub-agents' : 'Sub-agents'}</h2>
-        <span className="muted">{showArchived ? '' : working ? `${working} working` : 'none working'}</span>
+        <span className="muted">
+          {!showArchived && working > 0 && <span className="spinner tiny" aria-hidden="true" />}{' '}
+          {showArchived ? '' : working ? `${working} working` : 'none working'}
+        </span>
       </div>
+      {used && (
+        <p className="panel-usage" data-testid="bot-usage" title="The agents' own estimate at API prices; a subscription is not billed per call">
+          Used so far: {used}
+        </p>
+      )}
       <div className="panel-tools">
         <label className="check">
           <input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} /> Show archived
@@ -155,6 +173,8 @@ const TaskItem = memo(function TaskItem({
       return !data.ok && data.error ? <div className="note error">{String(data.error)}</div> : null;
     case 'state':
       return <div className="note">— {STATE_LABEL[data.state as Task['state']] ?? String(data.state)} —</div>;
+    case 'settings':
+      return <div className="note">— permissions from its next turn: {String(data.permissionMode)} —</div>;
     case 'archived':
       return <div className="note">— archived —</div>;
     case 'unarchived':
@@ -244,9 +264,16 @@ export function TaskDetail({ taskId }: { taskId: string }) {
           <div className="task-meta">
             <StatePill task={task} />
             <span>{taskId}</span>
+            <span>{ROLE_LABEL[task.role]}</span>
+            {task.forTaskId && (
+              <span>
+                checks <TaskChip id={task.forTaskId} />
+              </span>
+            )}
             <span>{botName}</span>
             <span>{settings(task)}</span>
-            {task.costUsd > 0 && <span title="The agent's own estimate for the whole session">{money(task.costUsd)} est.</span>}
+            <span title="What it may do without asking">{task.permissionMode}</span>
+            {spent(task) && <span title="The agent's own estimate for the whole session">{spent(task)}</span>}
             {task.maxBudgetUsd !== null && <span>budget {money(task.maxBudgetUsd)}</span>}
             {task.maxTurns !== null && <span>max {task.maxTurns} turns per run</span>}
           </div>
@@ -310,6 +337,11 @@ export function TaskDetail({ taskId }: { taskId: string }) {
         {log?.live && (
           <div className="msg bot live">
             <MarkdownText text={log.live} />
+          </div>
+        )}
+        {task?.state === 'running' && !log?.live && events && (
+          <div className="typing" aria-live="polite" data-testid="task-working">
+            <span className="spinner" /> Working…
           </div>
         )}
       </div>

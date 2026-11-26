@@ -28,16 +28,14 @@ export function clip(text: string | null | undefined, limit: number): string {
 
 const STORED_STRING_LIMIT = 2000;
 
-/** Keeps stored events small: long strings (file contents, command output) are cut. */
-export function truncate(value: unknown, depth = 0): unknown {
+/** Keeps stored events small: long strings (file contents, command output) are cut at `limit` characters. */
+export function truncate(value: unknown, depth = 0, limit = STORED_STRING_LIMIT): unknown {
   if (typeof value === 'string') {
-    return value.length > STORED_STRING_LIMIT
-      ? `${value.slice(0, STORED_STRING_LIMIT)}… (${value.length} chars)`
-      : value;
+    return value.length > limit ? `${value.slice(0, limit)}… (${value.length} chars)` : value;
   }
   if (depth > 6 || value === null || typeof value !== 'object') return value;
-  if (Array.isArray(value)) return value.slice(0, 50).map((item) => truncate(item, depth + 1));
-  return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, truncate(v, depth + 1)]));
+  if (Array.isArray(value)) return value.slice(0, 50).map((item) => truncate(item, depth + 1, limit));
+  return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, truncate(v, depth + 1, limit)]));
 }
 
 export function titleFrom(prompt: string): string {

@@ -6,6 +6,7 @@ import type { CodeBot } from '../../core/code-bot.ts';
 import { EFFORTS, IPC, ISOLATIONS, PERMISSION_MODES } from '../../shared/types.ts';
 import type { AppInfo, CodeBotApi, CodeBotMethod } from '../../shared/types.ts';
 import { openTerminal } from './terminal.ts';
+import type { Updater } from './updates.ts';
 
 const text = z.string();
 const id = z.string().min(1).max(100);
@@ -38,6 +39,18 @@ const userResponse = z.discriminatedUnion('decision', [
   z.object({ decision: z.literal('allow'), answers: z.record(z.string(), z.string()).optional() }),
   z.object({ decision: z.literal('deny'), message: z.string().optional() }),
 ]);
+const routineSchedule = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('once'), at: z.string().max(40) }),
+  z.object({ kind: z.literal('daily'), time: z.string().max(5), days: z.array(z.number().int().min(0).max(6)).max(7) }),
+  z.object({ kind: z.literal('interval'), minutes: z.number().int().min(1).max(100_000) }),
+]);
+const routineInput = z.object({
+  botId: id,
+  title: text.max(200),
+  prompt: text.max(20_000),
+  schedule: routineSchedule,
+  enabled: z.boolean(),
+});
 
 /** Argument schemas for every method the renderer may call, as tuples. */
 const ARGS: { [M in CodeBotMethod]: z.ZodType<Parameters<CodeBotApi[M]>> } = {
@@ -68,6 +81,13 @@ const ARGS: { [M in CodeBotMethod]: z.ZodType<Parameters<CodeBotApi[M]>> } = {
   setTaskArchived: z.tuple([id, z.boolean(), z.object({ discardChanges: z.boolean().optional() }).optional()]),
   listRequests: z.tuple([]),
   respond: z.tuple([id, id, userResponse]),
+  getUsage: z.tuple([]),
+  checkUsage: z.tuple([]),
+  listRoutines: z.tuple([]),
+  createRoutine: z.tuple([routineInput]),
+  updateRoutine: z.tuple([id, routineInput.partial()]),
+  deleteRoutine: z.tuple([id]),
+  runRoutine: z.tuple([id]),
   checkFolders: z.tuple([z.array(text).max(20)]),
   pickFolders: z.tuple([]),
   openExternal: z.tuple([text]),
@@ -75,6 +95,9 @@ const ARGS: { [M in CodeBotMethod]: z.ZodType<Parameters<CodeBotApi[M]>> } = {
   notify: z.tuple([z.object({ title: text.max(200), body: text.max(2000), botId: id.optional() })]),
   signIn: z.tuple([id]),
   openInTerminal: z.tuple([id]),
+  getUpdate: z.tuple([]),
+  checkForUpdate: z.tuple([]),
+  installUpdate: z.tuple([]),
 };
 
 function isDirectory(path: string): boolean {
@@ -88,6 +111,7 @@ function isDirectory(path: string): boolean {
 export interface IpcDeps {
   core: CodeBot;
   info: AppInfo;
+  updater: Updater;
   /** Folder a sign-in terminal starts in. */
   homeDir: string;
   window(): BrowserWindow | undefined;
@@ -122,6 +146,13 @@ export function registerIpc(deps: IpcDeps): void {
     setTaskArchived: (taskId, archived, options) => core.setTaskArchived(taskId, archived, options),
     listRequests: () => core.listRequests(),
     respond: (taskId, requestId, response) => core.respond(taskId, requestId, response),
+    getUsage: () => core.getUsage(),
+    checkUsage: () => core.checkUsage(),
+    listRoutines: () => core.listRoutines(),
+    createRoutine: (input) => core.createRoutine(input),
+    updateRoutine: (routineId, patch) => core.updateRoutine(routineId, patch),
+    deleteRoutine: (routineId) => core.deleteRoutine(routineId),
+    runRoutine: (routineId) => core.runRoutine(routineId),
     checkFolders: (paths) => core.checkFolders(paths),
     pickFolders: async () => {
       const window = deps.window();
@@ -161,6 +192,9 @@ export function registerIpc(deps: IpcDeps): void {
     openInTerminal: async (taskId) => {
       await openTerminal(core.terminalLaunch(taskId));
     },
+    getUpdate: () => deps.updater.get(),
+    checkForUpdate: () => deps.updater.check(),
+    installUpdate: () => deps.updater.install(),
   };
 
   const trusted = (event: IpcMainInvokeEvent) => {

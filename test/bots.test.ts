@@ -107,10 +107,12 @@ test('a question the project bot leaves open goes to the user where the work was
   assert.ok(texts(core, alpha.id).includes(`Left ${request.taskId}'s question for the user.`));
 
   core.respond(request.taskId, request.id, { decision: 'allow', answers: { 'Which colour?': 'Blue' } });
+  // The closed card keeps what was answered, so the conversation shows it.
   assert.deepEqual(core.getThread(MAIN_BOT_ID).events.find((event) => event.type === 'request.closed')?.data, {
     requestId: request.id,
     decision: 'allow',
     by: 'user',
+    answers: { 'Which colour?': 'Blue' },
   } satisfies ClosedData);
   await waitFor(core, () => texts(core, MAIN_BOT_ID).join('\n').includes('finished:'));
   assert.ok(taskTexts(core, request.taskId).includes('You answered: Blue'));
@@ -346,6 +348,8 @@ test('bots and history survive a restart; working sub-agents become interrupted'
     brain: new TestBrain(),
     workDir: `${alpha.folders[0]}-main`,
     retentionIntervalMs: 0,
+    usageIntervalMs: 0,
+    routineTickMs: 0,
   });
   assert.equal(again.tasks.getTask(task!.id).state, 'interrupted');
   assert.deepEqual(

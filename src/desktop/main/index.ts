@@ -12,9 +12,11 @@ import { MockEngine } from '../../core/engines/mock.ts';
 import type { Engine } from '../../core/engines/types.ts';
 import { ScriptedBrain } from '../../core/scripted-brain.ts';
 import { Store } from '../../core/store.ts';
-import { IPC } from '../../shared/types.ts';
-import type { AppInfo } from '../../shared/types.ts';
+import { IPC, MAIN_BOT_ID } from '../../shared/types.ts';
+import type { AppInfo, CoreEvent } from '../../shared/types.ts';
+import { resetBadge, showWaiting } from './badge.ts';
 import { registerIpc } from './ipc.ts';
+import { Updater } from './updates.ts';
 
 /**
  * The Electron main process. It hosts the whole orchestrator (bots, sub-agents,
@@ -27,10 +29,13 @@ import { registerIpc } from './ipc.ts';
  *   CODE_BOT_CLAUDE_EXECUTABLE  Claude Code binary to use instead of the bundled one
  *   CODE_BOT_CODEX_EXECUTABLE   Codex binary to use instead of codex on the PATH
  *   CODE_BOT_NO_QUIT_PROMPT=1   quit without asking even when sub-agents are working
+ *   CODE_BOT_NO_UPDATE_CHECK=1  never look for a newer release by itself
  */
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const fakeModels = process.env.CODE_BOT_FAKE_MODELS === '1';
+const UPDATE_FIRST_CHECK_MS = 15_000;
+const UPDATE_CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 
 if (process.env.CODE_BOT_USER_DATA) app.setPath('userData', resolve(process.env.CODE_BOT_USER_DATA));
 
@@ -53,10 +58,29 @@ function claudeExecutable(): string | undefined {
   return existsSync(unpacked) ? unpacked : undefined;
 }
 
-/** The window icon; Linux needs it set explicitly (Windows and macOS take it from the app). */
+/**
+ * The window icon. Linux needs it set explicitly. On Windows the .ico with every
+ * size is given too, so the taskbar picks the size it draws at (24, 30, 36, 48 px
+ * for 100-200 % scaling) instead of shrinking a larger one into a blur.
+ */
 function windowIcon(): string | undefined {
-  const icon = app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(here, '../../build/icon.png');
+  const name = process.platform === 'win32' ? 'icon.ico' : 'icon.png';
+  const icon = app.isPackaged ? join(process.resourcesPath, name) : join(here, '../../build', name);
   return existsSync(icon) ? icon : undefined;
+}
+
+/** Questions and approvals waiting for the user, across all bots. */
+function waitingCount(): number {
+  return core?.listBots().reduce((sum, bot) => sum + bot.status.needsYou, 0) ?? 0;
+}
+
+let badgeTimer: ReturnType<typeof setTimeout> | undefined;
+function refreshBadge(): void {
+  if (badgeTimer) return;
+  badgeTimer = setTimeout(() => {
+    badgeTimer = undefined;
+    showWaiting(window && !window.isDestroyed() ? window : undefined, waitingCount());
+  }, 150);
 }
 
 function focusWindow(): void {
@@ -94,7 +118,7 @@ function createWindow(): BrowserWindow {
     title: 'code-bot',
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#15171c' : '#f4f5f7',
     autoHideMenuBar: true,
-    icon: process.platform === 'linux' ? windowIcon() : undefined,
+    icon: process.platform === 'darwin' ? undefined : windowIcon(),
     webPreferences: {
       preload: join(here, '../preload/index.cjs'),
       sandbox: true,
@@ -103,7 +127,13 @@ function createWindow(): BrowserWindow {
       spellcheck: true,
     },
   });
-  created.once('ready-to-show', () => created.show());
+  created.once('ready-to-show', () => {
+    created.show();
+    resetBadge();
+    refreshBadge();
+  });
+  // A flashing taskbar button asks for attention; looking at the window stops it.
+  created.on('focus', () => created.flashFrame(false));
 
   // The window never navigates and never opens other windows; web links go to the default browser.
   created.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -155,9 +185,22 @@ function start(): void {
     fakeModels,
     engines: engines.map((engine) => engine.id),
   };
+  const send = (event: CoreEvent) => {
+    if (window && !window.isDestroyed()) window.webContents.send(IPC.event, event);
+  };
+  const updater = new Updater({
+    changed: (update) => send({ scope: 'app', id: 'app', botId: MAIN_BOT_ID, seq: 0, ts: new Date().toISOString(), type: 'update', data: update }),
+    quitToInstall: () => {
+      if (!confirmStop(window && !window.isDestroyed() ? window : undefined)) return false;
+      allowClose = true;
+      setImmediate(() => app.quit());
+      return true;
+    },
+  });
   registerIpc({
     core,
     info,
+    updater,
     homeDir: homedir(),
     window: () => (window && !window.isDestroyed() ? window : undefined),
     focusBot: (botId) => {
@@ -166,13 +209,25 @@ function start(): void {
     },
   });
   core.subscribe((event) => {
-    if (window && !window.isDestroyed()) window.webContents.send(IPC.event, event);
+    send(event);
+    if (event.scope === 'bot' && event.type === 'status') refreshBadge();
+    // Something needs the user while they look elsewhere: flash the taskbar button.
+    if (event.scope === 'thread' && event.type === 'request.surfaced' && window && !window.isDestroyed() && !window.isFocused()) {
+      window.flashFrame(true);
+    }
   });
 
   window = createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) window = createWindow();
   });
+
+  // Look for a newer release now and then (not in demo mode or tests: they stay off the network).
+  if (!fakeModels && process.env.CODE_BOT_NO_UPDATE_CHECK !== '1') {
+    const check = () => void updater.check();
+    setTimeout(check, UPDATE_FIRST_CHECK_MS).unref();
+    setInterval(check, UPDATE_CHECK_EVERY_MS).unref();
+  }
 }
 
 if (!app.requestSingleInstanceLock()) {

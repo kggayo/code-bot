@@ -21,10 +21,31 @@ Questions a project bot cannot answer, and approvals for risky actions, appear
 as cards in the conversation you are already in. They survive closing the app:
 answer them later and the sub-agent picks up where it stopped.
 
+One piece of work stays with one developer sub-agent from investigation to
+fix, so it keeps its context and its branch; QA and code reviewers are separate
+sub-agents whose findings go back to that developer.
+
 Also in the window: limits per sub-agent (turns, budget), how many sub-agents
 work at once, earlier conversations to read or continue, archiving (by hand or
 after 30 days), "Open in terminal" to continue a sub-agent's session yourself,
-and a banner with a Sign in button when a coding agent is not signed in.
+and a banner with a Sign in button when a coding agent is not signed in. And:
+
+- **Who is working**: spinners on busy bots and running sub-agents, a strip
+  above the message box with the project bots (or sub-agents) at work, and in
+  the main bot's side panel each project bot and what it is doing.
+- **Plan limits and costs**: how much of your Claude Code (and Codex) plan's
+  5-hour and weekly limits is used and when they reset, and what each bot and
+  sub-agent used (the agents' own estimates).
+- **Routines**: messages sent to a bot on a schedule (on chosen days at a time,
+  every few hours, or once), with the next ones in the sidebar.
+- **Readable approvals**: plans, commands, file edits and patches shown as
+  such, and the answer kept on a card once given.
+- **The taskbar icon** shows how many questions and approvals wait, and
+  flashes when a new one arrives.
+- **Updates**: code-bot tells you when a new version is out; on an installed
+  Windows copy one click downloads and starts the installer.
+- **Resizable panes**: drag the edges between the bot list, the conversation
+  and the side panel.
 
 ## Install
 

@@ -8,6 +8,8 @@ import type {
   Isolation,
   PendingRequest,
   PermissionMode,
+  Routine,
+  RoutineSchedule,
   StoredEvent,
   Task,
   TaskState,
@@ -131,6 +133,26 @@ const MIGRATIONS: string[] = [
     value TEXT NOT NULL
   );
   `,
+  // 3: sub-agent roles, usage of bots and Codex sub-agents, routines.
+  `
+  ALTER TABLE tasks ADD COLUMN role TEXT NOT NULL DEFAULT 'developer';
+  ALTER TABLE tasks ADD COLUMN for_task_id TEXT;
+  ALTER TABLE tasks ADD COLUMN tokens INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE threads ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0;
+  CREATE TABLE routines (
+    id TEXT PRIMARY KEY,
+    bot_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    schedule TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    next_run_at TEXT,
+    last_run_at TEXT,
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  `,
 ];
 
 /** The version this code writes. */
@@ -142,6 +164,8 @@ const TASK_COLUMNS = {
   title: 'title',
   state: 'state',
   requestedBy: 'requested_by',
+  role: 'role',
+  forTaskId: 'for_task_id',
   engine: 'engine',
   model: 'model',
   effort: 'effort',
@@ -153,6 +177,7 @@ const TASK_COLUMNS = {
   lastResult: 'last_result',
   error: 'error',
   costUsd: 'cost_usd',
+  tokens: 'tokens',
   maxTurns: 'max_turns',
   maxBudgetUsd: 'max_budget_usd',
   worktree: 'worktree',
@@ -238,6 +263,38 @@ function toThread(row: Row): ThreadRecord {
     engineSessionId: (row.engine_session_id as string | null) ?? null,
     createdAt: row.created_at as string,
     archivedAt: (row.archived_at as string | null) ?? null,
+  };
+}
+
+function toRoutine(row: Row): Routine {
+  return {
+    id: row.id as string,
+    botId: row.bot_id as string,
+    title: row.title as string,
+    prompt: row.prompt as string,
+    schedule: JSON.parse(String(row.schedule)) as RoutineSchedule,
+    enabled: Number(row.enabled) === 1,
+    nextRunAt: (row.next_run_at as string | null) ?? null,
+    lastRunAt: (row.last_run_at as string | null) ?? null,
+    lastError: (row.last_error as string | null) ?? null,
+    createdAt: row.created_at as string,
+    updatedAt: row.updated_at as string,
+  };
+}
+
+function routineValues(routine: Routine): Record<string, SqlValue> {
+  return {
+    id: routine.id,
+    bot_id: routine.botId,
+    title: routine.title,
+    prompt: routine.prompt,
+    schedule: JSON.stringify(routine.schedule),
+    enabled: routine.enabled ? 1 : 0,
+    next_run_at: routine.nextRunAt,
+    last_run_at: routine.lastRunAt,
+    last_error: routine.lastError,
+    created_at: routine.createdAt,
+    updated_at: routine.updatedAt,
   };
 }
 
@@ -346,6 +403,31 @@ export class Store {
 
   setThreadArchived(id: string, archivedAt: string | null): void {
     this.db.prepare('UPDATE threads SET archived_at = ? WHERE id = ?').run(archivedAt, id);
+  }
+
+  /** The bot session's cost so far (the engine reports it for the whole session). */
+  setThreadCost(id: string, costUsd: number): void {
+    this.db.prepare('UPDATE threads SET cost_usd = ? WHERE id = ?').run(costUsd, id);
+  }
+
+  /** What bots' own conversations cost: one bot's, or (without botId) every project bot's. */
+  botCost(botId?: string): number {
+    const row = (
+      botId
+        ? this.db.prepare('SELECT COALESCE(SUM(cost_usd), 0) AS usd FROM threads WHERE bot_id = ?').get(botId)
+        : this.db.prepare("SELECT COALESCE(SUM(cost_usd), 0) AS usd FROM threads WHERE bot_id <> 'main'").get()
+    ) as { usd: number };
+    return row.usd;
+  }
+
+  /** What sub-agents cost: one project's, or every project's. Archived ones count too. */
+  taskUsage(botId?: string): { usd: number; tokens: number } {
+    const row = (
+      botId
+        ? this.db.prepare('SELECT COALESCE(SUM(cost_usd), 0) AS usd, COALESCE(SUM(tokens), 0) AS tokens FROM tasks WHERE bot_id = ?').get(botId)
+        : this.db.prepare('SELECT COALESCE(SUM(cost_usd), 0) AS usd, COALESCE(SUM(tokens), 0) AS tokens FROM tasks').get()
+    ) as { usd: number; tokens: number };
+    return { usd: row.usd, tokens: row.tokens };
   }
 
   /** A bot's threads, newest first, with their first message and latest activity. */
@@ -528,6 +610,44 @@ export class Store {
       answer: row.answer ? (JSON.parse(String(row.answer)) as UserResponse) : null,
       answeredBy: (row.answered_by as 'user' | 'bot' | null) ?? null,
     }));
+  }
+
+  // ---- routines ---------------------------------------------------------------
+
+  insertRoutine(routine: Routine): void {
+    const values = routineValues(routine);
+    const columns = Object.keys(values);
+    this.db
+      .prepare(`INSERT INTO routines (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`)
+      .run(...Object.values(values));
+  }
+
+  saveRoutine(routine: Routine): void {
+    const values = routineValues(routine);
+    const columns = Object.keys(values).filter((column) => column !== 'id');
+    this.db
+      .prepare(`UPDATE routines SET ${columns.map((column) => `${column} = ?`).join(', ')} WHERE id = ?`)
+      .run(...columns.map((column) => values[column] ?? null), routine.id);
+  }
+
+  getRoutine(id: string): Routine | undefined {
+    const row = this.db.prepare('SELECT * FROM routines WHERE id = ?').get(id) as Row | undefined;
+    return row ? toRoutine(row) : undefined;
+  }
+
+  /** Routines of bots that still exist: the next to run first, then the ones that will not run again. */
+  listRoutines(): Routine[] {
+    const rows = this.db
+      .prepare(
+        `SELECT r.* FROM routines r JOIN bots b ON b.id = r.bot_id AND b.archived_at IS NULL
+         ORDER BY r.next_run_at IS NULL, r.next_run_at, r.title COLLATE NOCASE`,
+      )
+      .all() as Row[];
+    return rows.map(toRoutine);
+  }
+
+  deleteRoutine(id: string): void {
+    this.db.prepare('DELETE FROM routines WHERE id = ?').run(id);
   }
 
   // ---- events -----------------------------------------------------------------

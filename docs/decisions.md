@@ -430,3 +430,69 @@ without switching `gh`'s active account, which other projects on the PC use.
 
 **Why not `gh`'s own git helper:** in gh 2.92 it only serves the active account,
 whatever user name git asks for.
+
+## 28. One developer sub-agent per piece of work (2026-11-26)
+
+**Problem seen:** on 2026-11-18 a project bot ran an investigation as a
+read-only (`plan`) sub-agent in the shared folder; after the user decided on
+the fix, it started a new sub-agent in a worktree to build it. The developer
+lost the investigation's context, and each round added a worktree. (QA
+findings did already go back to the developer.)
+
+**Decided:** a ticket has one developer from investigation to fix; QA and
+reviewers are separate sub-agents tied to that developer (`role`,
+`for_subagent`). Enforced softly by prompts and by listing the project's recent
+sub-agents after every inbound message, and hard only where it is unambiguous:
+`for_subagent` with the developer role is refused with a pointer to
+`send_to_subagent`. `send_to_subagent` can loosen a `plan` sub-agent up to the
+project's mode, because "investigate read-only first" was why a new one was
+started.
+
+**Rejected:** moving a sub-agent into a worktree later (Claude Code keeps a
+session's transcript per working folder, so a resume in another folder finds
+nothing); refusing every second developer sub-agent (independent work in
+parallel is a requirement).
+
+## 29. Plan limits read without model usage; costs from the engines (2026-11-26)
+
+**Decided:** Claude Code's limits come from the Agent SDK's
+`usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET` (the data behind
+`/usage`): a Claude Code process started with no prompt answers in about 2
+seconds with the 5-hour and weekly windows (`rate_limits.limits[]`, with the
+older named windows as fallback). Codex's come from `account/rateLimits/read`.
+Both were tried on the owner's machine on 2026-11-26 (Claude Max, Codex
+business plan). Because the Claude call is marked experimental, every failure
+becomes a note in the window and nothing else depends on it; if it changes,
+`claudeUsageWindows` in `src/core/engines/claude.ts` is the one place to adapt.
+
+**Not used:** the `rate_limit_event` messages during runs: they only arrive
+when the status changes, so a meter built on them would be empty most of the
+time.
+
+**Costs:** a Claude result's `total_cost_usd` covers the whole session, also
+after a resume and after other sessions ran in the same folder (checked with
+haiku on 2026-11-26), so each conversation stores its latest value. These are
+API-price estimates; on a subscription nothing is billed per call, which the
+window says.
+
+## 30. Routines live in the core, in local time, and catch up once (2026-11-26)
+
+**Decided:** routines are stored in the database and run by the core (not the
+desktop shell), so they will also run when the core runs headless (Milestone
+2). Schedules are daily-on-weekdays at a local time, every N minutes, or once;
+no cron syntax. A routine due while code-bot was closed runs once at start-up,
+not once per missed slot. Bots cannot create routines (they have no tools that
+change code-bot); people set them up in the window.
+
+## 31. Updates from GitHub releases without electron-updater (2026-11-26)
+
+**Decided:** the app asks the GitHub API for the latest release, and an
+installed Windows copy downloads `code-bot-Setup-<version>.exe`, checks the
+size and SHA-256 that GitHub lists for the asset, starts the installer and
+quits. The portable zip, Linux packages, macOS and running from source open the
+release page instead.
+
+**Rejected:** `electron-updater`: another shipped dependency, and it wants a
+`latest.yml` published with each release and works best with signed
+installers. The installer is started visibly (not `/S`), so the user sees
+where it installs and can cancel.

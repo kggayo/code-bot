@@ -95,6 +95,13 @@ try {
     const card = conversation.locator('.request-card');
     await card.getByText('Approval needed').waitFor();
     await card.getByText('Run npm test').waitFor();
+    // The command is shown as a command, not as JSON.
+    assert.equal(await card.locator('.request-code').textContent(), 'npm test');
+    assert.equal(await card.getByText('{').count(), 0);
+    // The main bot shows the project bot at work, not its sub-agents.
+    await panel.getByTestId('team-item').filter({ hasText: '1 sub-agent working' }).waitFor();
+    assert.equal(await panel.getByTestId('subagent-item').count(), 0);
+    await page.getByTestId('activity-bar').getByText('demo').waitFor();
     if (shots) await page.screenshot({ path: join(shots, '1-approval-in-main.png') });
     await card.getByRole('button', { name: 'Allow' }).click();
     await card.getByText('You allowed it.').waitFor();
@@ -120,6 +127,8 @@ try {
     await card.getByRole('button', { name: /Blue/ }).click();
     await card.getByRole('button', { name: 'Send answer' }).click();
     await card.getByText('You answered.').waitFor();
+    // The card keeps the answer that was sent.
+    assert.equal(await card.getByTestId('answer').textContent(), '✓ Blue');
     await conversation.getByText(/t_[0-9a-f]{10} finished: echo\[dev-model\/high\]: ask which colour/).waitFor();
     if (shots) await page.screenshot({ path: join(shots, '2-project-bot.png') });
   });
@@ -199,6 +208,63 @@ try {
     await page.locator('[data-testid="composer"]').waitFor();
   });
 
+  await check('a working sub-agent shows above the message box and in the sidebar until it is done', async () => {
+    await say(page, 'task: hold on until told');
+    const bar = page.getByTestId('activity-bar');
+    await bar.getByText('hold on until told').waitFor();
+    await page.getByTestId('bot-demo').getByTestId('working-badge').waitFor();
+    await bar.getByRole('button', { name: /hold on until told/ }).click();
+    await panel.getByTestId('task-working').waitFor();
+    if (shots) await page.screenshot({ path: join(shots, '6-working.png') });
+    await panel.locator('.composer textarea').fill('that is all');
+    await panel.locator('.composer textarea').press('Enter');
+    await bar.waitFor({ state: 'detached' });
+    await panel.getByRole('button', { name: '← Sub-agents' }).click();
+    await panel.getByTestId('bot-usage').getByText(/sub-agents/).waitFor();
+  });
+
+  await check('a routine is set up for a bot, shows as upcoming, and runs on request', async () => {
+    await page.getByTestId('bot-routines').click();
+    const dialog = page.getByRole('dialog', { name: 'Routines' });
+    await dialog.getByTestId('new-routine').click();
+    const form = dialog.getByTestId('routine-form');
+    await form.locator('input[name="routineTitle"]').fill('Morning check');
+    await form.locator('textarea[name="routinePrompt"]').fill('check the build');
+    await form.locator('select[name="routineKind"]').selectOption('interval');
+    await form.locator('input[name="routineEvery"]').fill('3');
+    await form.locator('select[name="routineUnit"]').selectOption('hours');
+    await form.getByRole('button', { name: 'Add routine' }).click();
+    const item = dialog.getByTestId('routine-item').filter({ hasText: 'Morning check' });
+    await item.getByText('Every 3 hours').waitFor();
+    await page.getByTestId('upcoming-routines').getByText('Morning check').waitFor();
+    assert.equal(await page.getByTestId('bot-routines').textContent(), 'Routines (1)');
+    if (shots) await page.screenshot({ path: join(shots, '7-routines.png') });
+    await item.getByRole('button', { name: 'Run now' }).click();
+    await dialog.getByRole('button', { name: 'Close' }).click();
+    await dialog.waitFor({ state: 'detached' });
+    await conversation.getByTestId('routine-run').getByText('check the build').waitFor();
+    await conversation.getByText(/echo: \[routine "Morning check"/).waitFor();
+  });
+
+  await check('the panes can be resized, and the plan limits are shown', async () => {
+    const sidebar = page.locator('.sidebar');
+    const before = (await sidebar.boundingBox())?.width ?? 0;
+    const handle = page.getByRole('separator', { name: 'Resize the bot list' });
+    const box = await handle.boundingBox();
+    assert.ok(box);
+    await page.mouse.move(box.x + box.width / 2, box.y + 200);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 80, box.y + 200, { steps: 5 });
+    await page.mouse.up();
+    const after = (await sidebar.boundingBox())?.width ?? 0;
+    assert.ok(after > before + 60, `the sidebar grew from ${before} to ${after}`);
+    await page.getByRole('separator', { name: 'Resize the side panel' }).focus();
+    const panelBefore = (await panel.boundingBox())?.width ?? 0;
+    await page.keyboard.press('ArrowLeft');
+    assert.ok(((await panel.boundingBox())?.width ?? 0) > panelBefore);
+    await page.getByTestId('usage-meter').getByText('5-hour session').waitFor();
+  });
+
   await check('app settings can be changed, and the agents are checked', async () => {
     assert.equal(await page.getByTestId('engine-banner').count(), 0);
     await page.getByTestId('app-settings').click();
@@ -211,6 +277,7 @@ try {
     await page.getByTestId('app-settings').click();
     assert.equal(await page.locator('input[name="maxActiveSubagents"]').inputValue(), '5');
     assert.equal(await page.locator('input[name="archiveAfterDays"]').inputValue(), '14');
+    await page.getByTestId('updates').getByRole('button', { name: 'Check for updates' }).waitFor();
     if (shots) await page.screenshot({ path: join(shots, '5-app-settings.png') });
     await page.keyboard.press('Escape');
   });

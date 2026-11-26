@@ -8,18 +8,24 @@ import type {
   BotInput,
   BotPatch,
   BotStatus,
+  BotUsage,
   BotView,
   ClosedData,
   ConversationSummary,
   CoreEvent,
   Effort,
   EngineInfo,
+  EngineUsage,
   FolderCheck,
   InboundData,
   Isolation,
   PendingRequest,
   PermissionMode,
   Requester,
+  Routine,
+  RoutineInput,
+  RoutinePatch,
+  RoutineRunData,
   SubagentDefaults,
   SurfacedData,
   Task,
@@ -30,8 +36,9 @@ import type {
   UserResponse,
 } from '../shared/types.ts';
 import type { Brain } from './brain.ts';
-import type { Engine, EngineCheck, TerminalCommand } from './engines/types.ts';
+import type { Engine, EngineCheck, EngineUsageReport, TerminalCommand } from './engines/types.ts';
 import * as prompts from './prompts.ts';
+import { cleanSchedule, nextRun } from './routines.ts';
 import { BotRuntime } from './runtime.ts';
 import type { BrainOptions, Inbound, PreparedTurn, RuntimeHost, TurnOutcome } from './runtime.ts';
 import type { Store } from './store.ts';
@@ -56,6 +63,10 @@ export interface CodeBotOptions {
   questionTimeoutMs?: number;
   /** How often old sub-agents and conversations are archived (and deleted, if set). 0: never automatically. */
   retentionIntervalMs?: number;
+  /** How often the coding agents' plan limits are read. 0: only when asked (checkUsage). */
+  usageIntervalMs?: number;
+  /** How often due routines are looked for. 0: only when asked (runDueRoutines). */
+  routineTickMs?: number;
 }
 
 /** What a terminal needs to continue a sub-agent's session. */
@@ -73,6 +84,13 @@ export interface RetentionResult {
 const DEFAULT_QUESTION_TIMEOUT_MS = 120_000;
 const DEFAULT_RETENTION_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const FIRST_RETENTION_DELAY_MS = 60_000;
+const DEFAULT_USAGE_INTERVAL_MS = 10 * 60 * 1000;
+const FIRST_USAGE_DELAY_MS = 3000;
+/** After work ends the limits are read again, but at most this often. */
+const USAGE_MIN_GAP_MS = 2 * 60 * 1000;
+const DEFAULT_ROUTINE_TICK_MS = 30_000;
+const FIRST_ROUTINE_DELAY_MS = 5000;
+const MAX_ROUTINE_PROMPT = 20_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const NAME_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N} ._-]*$/u;
 const RESERVED_NAMES = new Set(['main', 'main bot']);
@@ -132,9 +150,17 @@ export class CodeBot {
   private readonly runtimes = new Map<string, BotRuntime>();
   private readonly emitter = new EventEmitter();
   private readonly questionTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  private readonly retentionTimers: ReturnType<typeof setTimeout>[] = [];
+  /** Retention, usage and routine timers, cleared at shutdown. */
+  private readonly timers: ReturnType<typeof setTimeout>[] = [];
   private readonly host: RuntimeHost;
   private readonly toolHost: ToolHost;
+  private readonly usageIntervalMs: number;
+  /** The plan limits as last read, per engine. */
+  private usage: EngineUsage[] = [];
+  private usageCheck: Promise<EngineUsage[]> | undefined;
+  private lastUsageCheck = 0;
+  private usageSoonTimer: ReturnType<typeof setTimeout> | undefined;
+  private closing = false;
 
   constructor(options: CodeBotOptions) {
     this.store = options.store;
@@ -160,8 +186,12 @@ export class CodeBot {
         return { threadId: bot.threadId, sessionId: this.store.getThread(bot.threadId)?.engineSessionId ?? null };
       },
       saveSession: (threadId, sessionId) => this.store.setThreadSession(threadId, sessionId),
+      saveCost: (threadId, costUsd) => this.saveCost(threadId, costUsd),
       emit: (threadId, botId, type, data, liveOnly) => this.emitThread(threadId, botId, type, data, liveOnly),
-      finished: (botId, turn, outcome) => this.finished(botId, turn, outcome),
+      finished: (botId, turn, outcome) => {
+        this.usageSoon();
+        return this.finished(botId, turn, outcome);
+      },
       statusChanged: (botId) => this.statusChanged(botId),
     };
     this.toolHost = {
@@ -170,6 +200,7 @@ export class CodeBot {
       findProjectBot: (nameOrId) => this.findProjectBot(nameOrId),
       messageProjectBot: (bot, text) => this.messageProjectBot(bot, text),
       startSubagent: (bot, args, requestedBy) => this.startSubagent(bot, args, requestedBy),
+      setSubagentPermission: (bot, taskId, mode) => this.setSubagentPermission(bot, taskId, mode),
       respondAsBot: (taskId, requestId, response) => this.tasks.respond(taskId, requestId, response, 'bot'),
       matchFolder: (bot, folder) => this.matchFolder(bot, folder),
       matchGitFolder: (bot, folder) => this.matchGitFolder(bot, folder),
@@ -191,15 +222,28 @@ export class CodeBot {
 
     const every = options.retentionIntervalMs ?? DEFAULT_RETENTION_INTERVAL_MS;
     if (every > 0) {
-      const sweep = () => {
+      this.repeat(every, Math.min(FIRST_RETENTION_DELAY_MS, every), () => {
         this.runRetention().catch((error) => console.error('code-bot: retention failed:', error));
-      };
-      const first = setTimeout(sweep, Math.min(FIRST_RETENTION_DELAY_MS, every));
-      const later = setInterval(sweep, every);
-      first.unref?.();
-      later.unref?.();
-      this.retentionTimers.push(first, later);
+      });
     }
+    this.usageIntervalMs = options.usageIntervalMs ?? DEFAULT_USAGE_INTERVAL_MS;
+    if (this.usageIntervalMs > 0) {
+      this.repeat(this.usageIntervalMs, FIRST_USAGE_DELAY_MS, () => void this.checkUsage());
+    }
+    const tick = options.routineTickMs ?? DEFAULT_ROUTINE_TICK_MS;
+    if (tick > 0) {
+      // The first look also runs routines that came due while code-bot was closed, once each.
+      this.repeat(tick, Math.min(FIRST_ROUTINE_DELAY_MS, tick), () => this.runDueRoutines());
+    }
+  }
+
+  /** Runs `job` after `first` ms and then every `every` ms, without keeping the process alive. */
+  private repeat(every: number, first: number, job: () => void): void {
+    const once = setTimeout(job, first);
+    const later = setInterval(job, every);
+    once.unref?.();
+    later.unref?.();
+    this.timers.push(once, later);
   }
 
   // ---- settings and engines ----------------------------------------------------
@@ -254,6 +298,54 @@ export class CodeBot {
     );
     this.emitApp('engines', infos);
     return infos;
+  }
+
+  /** The coding agents' plan limits as last read; reads them when they never were. */
+  async getUsage(): Promise<EngineUsage[]> {
+    return this.lastUsageCheck === 0 ? this.checkUsage() : this.usage;
+  }
+
+  /**
+   * Reads the plan limits of the agents in use: the bots' (Claude Code) and
+   * every project's sub-agent engine. Uses no model usage. Concurrent calls
+   * share one check.
+   */
+  checkUsage(): Promise<EngineUsage[]> {
+    if (this.usageCheck) return this.usageCheck;
+    this.usageCheck = (async () => {
+      const used = new Set<string>([this.defaultEngine, ...this.tasks.engineIds().filter((id) => id === 'claude')]);
+      for (const bot of this.store.listBots()) if (bot.kind === 'project') used.add(bot.subagents.engine);
+      const engines = [...used].flatMap((id) => this.tasks.engine(id) ?? []).filter((engine) => engine.usage);
+      const results = await Promise.all(
+        engines.map(async (engine): Promise<EngineUsage> => {
+          let report: EngineUsageReport;
+          try {
+            report = await engine.usage!();
+          } catch (error) {
+            report = { plan: null, windows: [], note: errorMessage(error) };
+          }
+          return { engineId: engine.id, label: engine.label, ...report, checkedAt: new Date().toISOString() };
+        }),
+      );
+      this.usage = results;
+      if (!this.closing) this.emitApp('usage', results);
+      return results;
+    })().finally(() => {
+      this.usageCheck = undefined;
+      this.lastUsageCheck = Date.now();
+    });
+    return this.usageCheck;
+  }
+
+  /** Reads the limits again soon after work ended, but not more often than every two minutes. */
+  private usageSoon(): void {
+    if (this.usageIntervalMs <= 0 || this.usageSoonTimer || this.closing) return;
+    const wait = Math.max(5000, this.lastUsageCheck + USAGE_MIN_GAP_MS - Date.now());
+    this.usageSoonTimer = setTimeout(() => {
+      this.usageSoonTimer = undefined;
+      void this.checkUsage();
+    }, wait);
+    this.usageSoonTimer.unref?.();
   }
 
   /** The command that signs in to an engine, for a terminal. */
@@ -506,6 +598,90 @@ export class CodeBot {
     this.tasks.respond(taskId, requestId, response, 'user');
   }
 
+  // ---- routines ----------------------------------------------------------------
+
+  /** Every routine of a bot that still exists, the next to run first. */
+  listRoutines(): Routine[] {
+    return this.store.listRoutines();
+  }
+
+  createRoutine(input: RoutineInput): Routine {
+    const clean = this.validateRoutine(input);
+    const now = new Date();
+    const routine: Routine = {
+      id: newId('rt'),
+      ...clean,
+      nextRunAt: null,
+      lastRunAt: null,
+      lastError: null,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    };
+    routine.nextRunAt = this.plannedRun(routine, now);
+    this.store.insertRoutine(routine);
+    this.routinesChanged();
+    return routine;
+  }
+
+  updateRoutine(routineId: string, patch: RoutinePatch): Routine {
+    const current = this.routine(routineId);
+    const clean = this.validateRoutine({
+      botId: patch.botId ?? current.botId,
+      title: patch.title ?? current.title,
+      prompt: patch.prompt ?? current.prompt,
+      schedule: patch.schedule ?? current.schedule,
+      enabled: patch.enabled ?? current.enabled,
+    });
+    const now = new Date();
+    const next: Routine = { ...current, ...clean, updatedAt: now.toISOString() };
+    if (patch.schedule !== undefined || patch.enabled !== undefined) next.nextRunAt = this.plannedRun(next, now);
+    this.store.saveRoutine(next);
+    this.routinesChanged();
+    return next;
+  }
+
+  deleteRoutine(routineId: string): void {
+    this.routine(routineId);
+    this.store.deleteRoutine(routineId);
+    this.routinesChanged();
+  }
+
+  /** Runs a routine now ("Run now"); its schedule stays as it is. */
+  runRoutine(routineId: string): void {
+    const routine = this.routine(routineId);
+    this.startRoutine(routine, true);
+    this.store.saveRoutine({ ...routine, lastRunAt: new Date().toISOString(), lastError: null });
+    this.routinesChanged();
+  }
+
+  /**
+   * Starts every enabled routine whose time has come, once each (also when
+   * several runs were missed while code-bot was closed), and plans its next run.
+   */
+  runDueRoutines(now: Date = new Date()): void {
+    let changed = false;
+    for (const routine of this.store.listRoutines()) {
+      if (!routine.enabled || !routine.nextRunAt || Date.parse(routine.nextRunAt) > now.getTime()) continue;
+      let lastError: string | null = null;
+      try {
+        this.startRoutine(routine, false);
+      } catch (error) {
+        lastError = errorMessage(error);
+      }
+      const once = routine.schedule.kind === 'once';
+      this.store.saveRoutine({
+        ...routine,
+        enabled: once ? false : routine.enabled,
+        nextRunAt: once ? null : (nextRun(routine.schedule, now, new Date(routine.nextRunAt))?.toISOString() ?? null),
+        lastRunAt: now.toISOString(),
+        lastError,
+        updatedAt: now.toISOString(),
+      });
+      changed = true;
+    }
+    if (changed) this.routinesChanged();
+  }
+
   // ---- retention ---------------------------------------------------------------
 
   /**
@@ -569,9 +745,11 @@ export class CodeBot {
 
   /** Stops every bot turn and sub-agent and waits for them to wind down. Sub-agent sessions and open requests stay resumable. */
   async shutdown(): Promise<void> {
+    this.closing = true;
     for (const timer of this.questionTimers.values()) clearTimeout(timer);
     this.questionTimers.clear();
-    for (const timer of this.retentionTimers) clearTimeout(timer);
+    for (const timer of this.timers) clearTimeout(timer);
+    clearTimeout(this.usageSoonTimer);
     const bots = [...this.runtimes.values()].map((runtime) => runtime.close());
     await this.tasks.shutdown();
     await Promise.all(bots);
@@ -621,7 +799,14 @@ export class CodeBot {
         return;
       }
       case 'request.resolved': {
-        const data = event.data as { id: string; decision: ClosedData['decision']; by: ClosedData['by']; surfacedIn: string | null };
+        const data = event.data as {
+          id: string;
+          decision: ClosedData['decision'];
+          by: ClosedData['by'];
+          surfacedIn: string | null;
+          answers?: Record<string, string>;
+          message?: string;
+        };
         const timer = this.questionTimers.get(data.id);
         if (timer) {
           clearTimeout(timer);
@@ -631,6 +816,8 @@ export class CodeBot {
           const thread = this.store.getThread(data.surfacedIn);
           if (thread) {
             const closed: ClosedData = { requestId: data.id, decision: data.decision, by: data.by };
+            if (data.answers) closed.answers = data.answers;
+            if (data.message) closed.message = data.message;
             this.emitThread(thread.id, thread.botId, 'request.closed', closed);
             this.statusChanged(thread.botId);
           }
@@ -643,10 +830,16 @@ export class CodeBot {
           const task = this.tasks.getTask(event.id);
           this.runtime(task.botId).enqueue({ kind: 'task', taskId: task.id, event: state, requester: task.requestedBy });
         }
+        if (FINISHED_STATES.includes(state)) this.usageSoon();
         this.statusChanged(event.botId);
         this.statusChanged(MAIN_BOT_ID);
         return;
       }
+      case 'result':
+        // Its cost changed.
+        this.statusChanged(event.botId);
+        this.statusChanged(MAIN_BOT_ID);
+        return;
     }
   }
 
@@ -654,11 +847,18 @@ export class CodeBot {
     const bot = this.bot(botId);
     const first = items[0];
     if (!first) return undefined;
+    // Project bots see their recent sub-agents after each message, so follow-ups go to the one that has the work.
+    const recent = (text: string) =>
+      bot.kind === 'project'
+        ? prompts.withRecent(text, prompts.recentSubagents(this.tasks.listTasks({ botId: bot.id, archived: false, limit: 20 })))
+        : text;
     switch (first.kind) {
       case 'user':
-        return { prompt: first.text, replyTo: 'user', questionRequestIds: [] };
+        return { prompt: recent(first.text), replyTo: 'user', questionRequestIds: [] };
       case 'main':
-        return { prompt: prompts.fromMain(first.text), replyTo: 'main', questionRequestIds: [] };
+        return { prompt: recent(prompts.fromMain(first.text)), replyTo: 'main', questionRequestIds: [] };
+      case 'routine':
+        return { prompt: recent(prompts.fromRoutine(first.title, first.text)), replyTo: 'user', questionRequestIds: [] };
       case 'report': {
         const reports = items.flatMap((item) =>
           item.kind === 'report' ? [{ name: this.store.getBot(item.fromBotId)?.name ?? item.fromBotId, text: item.text }] : [],
@@ -802,6 +1002,13 @@ export class CodeBot {
         `This project allows sub-agents at most "${defaults.permissionMode}" permissions; "${permissionMode}" is looser`,
       );
     }
+    const role = args.role ?? 'developer';
+    if (args.forTaskId && role === 'developer') {
+      throw new CodeBotError(
+        'invalid',
+        `for_subagent is for QA and reviewers. To continue developer ${args.forTaskId}, use send_to_subagent instead of starting a new sub-agent.`,
+      );
+    }
     const isolation: Isolation = args.worktree === undefined ? defaults.isolation : args.worktree ? 'worktree' : 'shared';
     const id = newId('t');
     const title = args.title?.trim() || titleFrom(args.brief);
@@ -821,13 +1028,15 @@ export class CodeBot {
         prompt: args.brief,
         title,
         requestedBy,
+        role,
+        forTaskId: args.forTaskId ?? null,
         cwd,
         additionalDirectories: current.folders.filter((candidate) => candidate !== folder),
         engine: args.engine ?? defaults.engine,
         model: args.model ?? defaults.model,
         effort: args.effort ?? defaults.effort,
         permissionMode,
-        instructions: prompts.subagentInstructions(current, folder, worktree ? { cwd, worktree } : undefined),
+        instructions: prompts.subagentInstructions(current, folder, worktree ? { cwd, worktree } : undefined, role),
         maxTurns: defaults.maxTurns,
         maxBudgetUsd: defaults.maxBudgetUsd,
         worktree,
@@ -842,6 +1051,19 @@ export class CodeBot {
       branch: worktree?.branch,
     });
     return task;
+  }
+
+  /** A project bot changes one of its sub-agents' permission mode, within what the project allows. */
+  private setSubagentPermission(bot: Bot, taskId: string, mode: PermissionMode): Task {
+    const current = this.bot(bot.id);
+    if (!PERMISSION_MODES.includes(mode)) throw new CodeBotError('invalid', `Unknown permission mode "${mode}"`);
+    if (permissionRank(mode) > permissionRank(current.subagents.permissionMode)) {
+      throw new CodeBotError(
+        'invalid',
+        `This project allows sub-agents at most "${current.subagents.permissionMode}" permissions; "${mode}" is looser`,
+      );
+    }
+    return this.tasks.setPermissionMode(taskId, mode);
   }
 
   /** Right before a sub-agent's turn: bring back its worktree if it was removed, and apply the project's current limits. */
@@ -1045,7 +1267,69 @@ export class CodeBot {
       busy: this.runtimes.get(bot.id)?.isBusy() ?? false,
       activeSubagents: this.tasks.countActive(bot.kind === 'main' ? undefined : bot.id),
       needsYou: this.tasks.pendingRequests().filter((request) => request.surfacedIn === bot.threadId).length,
+      usage: this.usageOf(bot),
     };
+  }
+
+  private usageOf(bot: Bot): BotUsage {
+    const main = bot.kind === 'main';
+    const subagents = this.store.taskUsage(main ? undefined : bot.id);
+    return {
+      botUsd: this.store.botCost(bot.id),
+      projectBotsUsd: main ? this.store.botCost() : 0,
+      subagentsUsd: subagents.usd,
+      subagentTokens: subagents.tokens,
+    };
+  }
+
+  private saveCost(threadId: string, costUsd: number): void {
+    this.store.setThreadCost(threadId, costUsd);
+    const thread = this.store.getThread(threadId);
+    if (!thread) return;
+    this.statusChanged(thread.botId);
+    if (thread.botId !== MAIN_BOT_ID) this.statusChanged(MAIN_BOT_ID);
+  }
+
+  // ---- routines: checks and runs ------------------------------------------------
+
+  private routine(routineId: string): Routine {
+    const routine = this.store.getRoutine(routineId);
+    if (!routine || !this.store.getBot(routine.botId)) throw new CodeBotError('not_found', `No routine with id "${routineId}"`);
+    return routine;
+  }
+
+  private validateRoutine(input: RoutineInput): RoutineInput {
+    const bot = this.bot(String(input.botId ?? ''));
+    const title = String(input.title ?? '').trim();
+    if (!title) throw new CodeBotError('invalid', 'Give the routine a name');
+    if (title.length > 80) throw new CodeBotError('invalid', 'Keep the name to 80 characters or fewer');
+    const prompt = String(input.prompt ?? '').trim();
+    if (!prompt) throw new CodeBotError('invalid', `Write what ${bot.name} should do each time`);
+    if (prompt.length > MAX_ROUTINE_PROMPT) throw new CodeBotError('invalid', `Keep the message under ${MAX_ROUTINE_PROMPT} characters`);
+    const schedule = cleanSchedule(input.schedule);
+    const enabled = input.enabled !== false;
+    if (enabled && schedule.kind === 'once' && Date.parse(schedule.at) <= Date.now()) {
+      throw new CodeBotError('invalid', 'That time has passed: pick a time in the future');
+    }
+    return { botId: bot.id, title, prompt, schedule, enabled };
+  }
+
+  /** The next time a routine runs from now, or null when it will not. */
+  private plannedRun(routine: Routine, now: Date): string | null {
+    if (!routine.enabled) return null;
+    return nextRun(routine.schedule, now)?.toISOString() ?? null;
+  }
+
+  /** Puts a routine's message to its bot, as if the user typed it. */
+  private startRoutine(routine: Routine, manual: boolean): void {
+    const bot = this.bot(routine.botId);
+    const data: RoutineRunData = { routineId: routine.id, title: routine.title, text: routine.prompt, manual };
+    this.emitThread(bot.threadId, bot.id, 'routine.run', data);
+    this.runtime(bot.id).enqueue({ kind: 'routine', routineId: routine.id, title: routine.title, text: routine.prompt });
+  }
+
+  private routinesChanged(): void {
+    this.emitApp('routines', this.listRoutines());
   }
 
   private statusChanged(botId: string): void {

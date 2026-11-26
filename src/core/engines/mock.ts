@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { AskUser, Engine, EngineCheck, EngineEvent, EngineRun, EngineRunOptions } from './types.ts';
+import type { AskUser, Engine, EngineCheck, EngineEvent, EngineRun, EngineRunOptions, EngineUsageReport } from './types.ts';
 
 /** What one mock run costs, so budget limits can be tested. */
 const RUN_COST_USD = 0.01;
@@ -26,6 +26,19 @@ export class MockEngine implements Engine {
 
   async check(): Promise<EngineCheck> {
     return { ready: true, detail: 'The mock agent needs no sign-in.' };
+  }
+
+  /** Made-up limits, so the window has something to show in demo mode. */
+  async usage(): Promise<EngineUsageReport> {
+    const hours = (count: number) => new Date(Date.now() + count * 3_600_000).toISOString();
+    return {
+      plan: 'demo',
+      windows: [
+        { id: 'session', label: '5-hour session', usedPercent: 12, resetsAt: hours(3), severity: 'normal' },
+        { id: 'weekly_all', label: 'Week · all models', usedPercent: 4, resetsAt: hours(100), severity: 'normal' },
+      ],
+      note: null,
+    };
   }
 
   start(options: EngineRunOptions, askUser: AskUser): EngineRun {

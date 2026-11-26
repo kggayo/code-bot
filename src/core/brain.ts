@@ -39,8 +39,8 @@ export type BrainEvent =
   | { type: 'text_delta'; text: string }
   | { type: 'text'; text: string }
   | { type: 'tool'; name: string; input: unknown }
-  /** text: the final message of the turn. */
-  | { type: 'result'; ok: boolean; text: string; error?: string };
+  /** text: the final message of the turn. costUsd: the engine's estimate for the whole session so far. */
+  | { type: 'result'; ok: boolean; text: string; error?: string; costUsd?: number };
 
 /** The model behind a bot. One call is one turn of the conversation. */
 export interface Brain {
@@ -152,6 +152,7 @@ export class ClaudeBrain implements Brain {
               : message.subtype === 'success'
                 ? message.result
                 : message.errors.join('\n') || message.subtype,
+            costUsd: message.total_cost_usd,
           };
           if (!message.queued_turn_count && queue.pending === 0) queue.close();
         }

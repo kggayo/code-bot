@@ -72,6 +72,7 @@ and verified:
 | Open in terminal | The launcher (`src/desktop/main/terminal.ts`) starts a detached program in the given folder on Windows; the interactive Claude/Codex session it opens was not driven by a test |
 | Packaged Windows app | `electron-builder --win` + `scripts/packaged-check.ts`: starts, the sign-in check runs its unpacked Claude Code, a real main-bot turn runs. App icon. Unsigned. |
 | Releases | `.github/workflows/release.yml` published v0.3.0 from its tag (2026-11-17): Windows installer and portable zip, Linux AppImage and deb, built and tested on GitHub's runners, https://github.com/kggayo/code-bot/releases |
+| Desk improvements (branch `feature/desk-improvements`, 2026-11-26): one developer per piece of work (roles, `for_subagent`, permission changes, recent sub-agents in each message), plan limits and costs, routines, resizable panes, activity indicators, readable approvals, answered cards, taskbar badge, update button, sharper icon | `npm test`: 56 tests on Windows (`test/work.test.ts` covers roles, follow-ups, permissions, usage, limit parsing, schedules and routine runs). `npm run e2e`: 17 checks on Windows (approval as a command, main bot's project-bot panel and activity strip, answered card, working sub-agent strip, routines, resizing, plan limits, Updates section). The plan-limit calls were tried against real Claude Code (Max) and Codex 0.160.1 by hand. Not verified: installing an update (needs a newer release on GitHub), the taskbar badge and flashing (native), Linux. |
 | CI on GitHub | `.github/workflows/build.yml` on `windows-latest` and `ubuntu-latest` (under a virtual display): typecheck, tests, end-to-end and installers, uploaded as artifacts. Passed on both for the first push to `main` (2026-11-17), https://github.com/kggayo/code-bot/actions |
 | Linux AppImage and deb | Built in WSL with `npm run package:linux`; `scripts/packaged-check.ts` against `release/linux-unpacked`: starts and its sign-in check runs the unpacked Claude Code. The model turn was skipped: Claude Code in WSL was not signed in (its April login had expired) |
 
@@ -97,7 +98,7 @@ npm run package      # installer for the current platform into release/
 npx electron-builder --dir --publish never && node scripts/packaged-check.ts   # quick check of a packaged build
 node scripts/codex-check.ts          # the Codex engine against real Codex (uses Codex usage)
 node scripts/auto-mode-check.ts      # Claude Code "auto" permissions on this login (uses model usage)
-npx electron scripts/make-icons.mjs  # regenerate build/ icons from build/icon.svg
+npx electron scripts/make-icons.mjs  # regenerate build/ icons from build/icon.svg and build/icon-small.svg
 ```
 
 `packaged-check.ts` exits with code 3 when everything worked except the model
@@ -139,6 +140,7 @@ Environment variables (read by `src/desktop/main/index.ts` and the engines):
 | `CODE_BOT_CLAUDE_EXECUTABLE` | Use this Claude Code binary instead of the one bundled with the Agent SDK. |
 | `CODE_BOT_CODEX_EXECUTABLE` | Use this Codex binary instead of `codex` on the PATH. |
 | `CODE_BOT_NO_QUIT_PROMPT=1` | Quit without asking even while sub-agents work (tests). |
+| `CODE_BOT_NO_UPDATE_CHECK=1` | Never look for a newer release by itself (demo mode never does either). |
 
 Claude Code must be signed in on the machine for real use. The app checks on
 start-up and shows a banner with a Sign in button (it opens a terminal running
@@ -173,16 +175,16 @@ file). A failed run leaves no release: fix, move the tag
 
 | Path | What |
 |---|---|
-| `src/core/` | The orchestrator. No Electron imports: it must stay runnable headless. Start with `code-bot.ts`; `tasks.ts` runs sub-agents, `worktrees.ts` their git worktrees, `engines/` the coding agents (`claude.ts`, `codex.ts`, `mock.ts`). |
+| `src/core/` | The orchestrator. No Electron imports: it must stay runnable headless. Start with `code-bot.ts`; `tasks.ts` runs sub-agents, `worktrees.ts` their git worktrees, `routines.ts` routine schedules, `engines/` the coding agents (`claude.ts`, `codex.ts`, `mock.ts`). |
 | `src/shared/types.ts` | Every type shared by core, main, preload and renderer, including `CodeBotApi` and the event shapes. |
-| `src/desktop/main/` | Electron main process: window, IPC (`ipc.ts`), terminals (`terminal.ts`), quit handling. |
+| `src/desktop/main/` | Electron main process: window, IPC (`ipc.ts`), terminals (`terminal.ts`), the taskbar badge (`badge.ts`), updates (`updates.ts`), quit handling. |
 | `src/desktop/preload/` | The `window.codeBot` bridge. |
 | `src/desktop/renderer/` | The React interface. `src/state.ts` is the window's state; `src/components/` the views. |
 | `test/` | `node:test` suites for the core. `helpers.ts` has `setup`, `TestBrain` (scripted, with per-bot overrides) and waiters. |
 | `scripts/e2e.ts`, `scripts/live-check.ts` | Playwright drives the built app: scripted models, then real Claude. |
 | `scripts/packaged-check.ts` | Starts the packaged app from `release/` and runs one real model turn, proving it finds its unpacked Claude Code. |
 | `scripts/codex-check.ts`, `scripts/auto-mode-check.ts` | Live checks of the Codex engine and of Claude Code's `auto` mode. |
-| `scripts/make-icons.mjs`, `build/` | The app icon: `build/icon.svg` and the PNG/ICO files made from it. |
+| `scripts/make-icons.mjs`, `build/` | The app icon: `build/icon.svg`, `build/icon-small.svg` (16-32 px) and the PNG/ICO files made from them. |
 | `scripts/wsl-sync.sh` | Copies the checkout into WSL for Linux builds and checks. |
 | `.github/workflows/build.yml` | CI for Windows and Linux on every push to `main` and every pull request: typecheck, tests, end-to-end, installers (as artifacts). |
 | `.github/workflows/release.yml`, `.github/release-notes.md` | Publishes a GitHub release with the installers when a version tag is pushed; the notes file is the release text. |
@@ -281,3 +283,20 @@ file). A failed run leaves no release: fix, move the tag
   `package.json`.
 - **`getByRole('button', { name: 'Settings' })` is ambiguous** in the window
   (bot settings and app settings); the scripts use `exact: true` or test ids.
+- **Messages to project bots carry a list of recent sub-agents** after the
+  text (`prompts.recentSubagents`), so tests that look at `input.prompt` see
+  it, and `ScriptedBrain` strips it with `prompts.withoutRecent`. It is what
+  steers follow-ups to the sub-agent that has the work (decision 28).
+- **A request's input keeps strings up to 30000 characters**, other stored
+  events 2000 (`truncate(value, 0, limit)`): people approve what they see, and
+  plans are long.
+- **The Claude plan limits use an experimental SDK call**
+  (`ClaudeEngine.usage`). After an SDK upgrade, check it still answers; a
+  failure only shows as a note in the window (decision 29).
+- **Routines run in local time** and only while the core runs; missed runs
+  happen once at start-up (decision 30). Tests call `runDueRoutines(now)`
+  with `routineTickMs: 0`; `test/helpers.ts` also sets `usageIntervalMs: 0`.
+- **The Windows icon needs every size** the shell asks for (16-256, including
+  20, 30, 36, 40); a missing size is shrunk from another and looks blurred.
+  Sizes up to 32 px come from `build/icon-small.svg`. Regenerate with
+  `npx electron scripts/make-icons.mjs` after changing either SVG.

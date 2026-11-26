@@ -2,9 +2,9 @@
  * The contract every coding agent ("engine") implements, so sub-agents can be
  * Claude Code, Codex or anything else without the core knowing.
  */
-import type { UserResponse } from '../../shared/types.ts';
+import type { UsageWindow, UserResponse } from '../../shared/types.ts';
 
-export type { UserResponse };
+export type { UsageWindow, UserResponse };
 
 export interface EngineRunOptions {
   /** Directory the agent starts in. */
@@ -49,6 +49,8 @@ export type EngineEvent =
       limit?: 'turns' | 'budget';
       /** Estimated cost of the whole session so far, when the engine knows it. */
       costUsd?: number;
+      /** Tokens used by the whole session so far, for engines that report tokens instead of money. */
+      tokens?: number;
       durationMs?: number;
       numTurns?: number;
     };
@@ -95,6 +97,15 @@ export interface EngineCheck {
   signIn?: TerminalCommand;
 }
 
+/** How much of the signed-in plan's limits is used. */
+export interface EngineUsageReport {
+  /** The plan, e.g. "max" or "plus", when known. */
+  plan: string | null;
+  windows: UsageWindow[];
+  /** Why there are no windows, e.g. "Signed in with an API key: no plan limits." */
+  note: string | null;
+}
+
 export interface Engine {
   readonly id: string;
   /** Name shown to people, for example "Claude Code". */
@@ -102,6 +113,8 @@ export interface Engine {
   start(options: EngineRunOptions, askUser: AskUser): EngineRun;
   /** Checks that the agent is installed and signed in. Must not use model usage. */
   check?(): Promise<EngineCheck>;
+  /** Reads how much of the plan's limits is used (the 5-hour session, the week). Must not use model usage. */
+  usage?(): Promise<EngineUsageReport>;
   /** The command that continues a session interactively; it is run in the session's working folder. */
   resumeCommand?(sessionId: string): TerminalCommand | undefined;
 }

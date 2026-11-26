@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { EFFORTS, PERMISSION_MODES } from '../shared/types.ts';
-import type { Bot, BotView, Effort, PermissionMode, Requester, Task, UserResponse } from '../shared/types.ts';
+import { EFFORTS, PERMISSION_MODES, SUBAGENT_ROLES } from '../shared/types.ts';
+import type { Bot, BotView, Effort, PermissionMode, Requester, SubagentRole, Task, UserResponse } from '../shared/types.ts';
 import type { BotTool } from './brain.ts';
 import { GIT_SUBCOMMANDS, runGit } from './git.ts';
 import type { TaskManager } from './tasks.ts';
@@ -9,6 +9,10 @@ import { clip } from './util.ts';
 export interface SubagentArgs {
   title?: string;
   brief: string;
+  /** Default: developer. */
+  role?: SubagentRole;
+  /** For QA and reviewers: the developer sub-agent whose work it checks. */
+  forTaskId?: string;
   folder?: string;
   model?: string;
   effort?: Effort;
@@ -25,6 +29,8 @@ export interface ToolHost {
   findProjectBot(nameOrId: string): Bot;
   messageProjectBot(bot: Bot, text: string): void;
   startSubagent(bot: Bot, args: SubagentArgs, requestedBy: Requester): Promise<Task>;
+  /** Changes a sub-agent's permission mode from its next turn; never looser than the project allows. */
+  setSubagentPermission(bot: Bot, taskId: string, mode: PermissionMode): Task;
   respondAsBot(taskId: string, requestId: string, response: UserResponse): void;
   matchFolder(bot: Bot, folder: string): string;
   /** A project folder or one of the project's sub-agent worktrees. */
@@ -39,7 +45,10 @@ function summary(task: Task, tasks: TaskManager) {
     id: task.id,
     title: task.title,
     state: task.state,
+    role: task.role,
+    for_subagent: task.forTaskId,
     requested_by: task.requestedBy,
+    permission_mode: task.permissionMode,
     engine: task.engine,
     model: task.model,
     effort: task.effort,
@@ -126,10 +135,18 @@ export function projectBotTools(host: ToolHost, bot: Bot, requester: () => Reque
     {
       name: 'start_subagent',
       description:
-        'Start a sub-agent (developer or QA) on one task in this project. Returns at once with its id; it works in the background and you get an update when it finishes, fails or has a question.',
+        'Start a sub-agent for new work in this project: a developer for a new piece of work, or QA or a reviewer to check a developer\'s work. Not for follow-ups to existing work: answers, decisions, "now fix it" and QA or review findings go to the sub-agent that has the work, with send_to_subagent. Returns at once with its id; it works in the background and you get an update when it finishes, fails or has a question.',
       schema: {
         title: z.string().describe('Short title for the task'),
         brief: z.string().describe('Complete, self-contained brief: goal, relevant files, constraints, how to verify'),
+        role: z
+          .enum(SUBAGENT_ROLES)
+          .optional()
+          .describe('developer (default): owns one piece of work from investigation to fix. qa: tests a developer\'s work. reviewer: reviews a developer\'s changes. other: anything else.'),
+        for_subagent: z
+          .string()
+          .optional()
+          .describe('For qa and reviewer: the id of the developer sub-agent whose work this one checks'),
         folder: z.string().optional().describe(`Project folder to work in (default: the primary one). One of: ${folderNames}`),
         model: z.string().optional().describe("Model for this sub-agent, if it should differ from the project's default"),
         effort: z.enum(EFFORTS).optional().describe("Effort for this sub-agent, if it should differ from the project's default"),
@@ -151,6 +168,8 @@ export function projectBotTools(host: ToolHost, bot: Bot, requester: () => Reque
             {
               title: optionalText(args.title),
               brief: String(args.brief ?? ''),
+              role: args.role as SubagentRole | undefined,
+              forTaskId: optionalText(args.for_subagent) ? own(args.for_subagent).id : undefined,
               folder: optionalText(args.folder),
               model: optionalText(args.model),
               effort: args.effort as Effort | undefined,
@@ -198,9 +217,25 @@ export function projectBotTools(host: ToolHost, bot: Bot, requester: () => Reque
     },
     {
       name: 'send_to_subagent',
-      description: 'Send a message to a sub-agent: redirect it while it works, or continue its session after it finished.',
-      schema: { id: z.string().describe('Sub-agent id'), text: z.string().describe('The message') },
-      run: (args) => summary(host.tasks.sendMessage(own(args.id).id, String(args.text ?? ''), 'lead'), host.tasks),
+      description:
+        'Send a message to a sub-agent: redirect it while it works, or continue its session after it finished, failed or was stopped. Use it for every follow-up to existing work: the user\'s answers and decisions, more information, "now implement it", QA or review findings for the developer, "check again" for QA.',
+      schema: {
+        id: z.string().describe('Sub-agent id'),
+        text: z.string().describe('The message'),
+        permission_mode: z
+          .enum(PERMISSION_MODES)
+          .optional()
+          .describe(
+            `Change its permissions from its next turn on, e.g. from "plan" to "${bot.subagents.permissionMode}" when an investigation moves on to the fix. At most "${bot.subagents.permissionMode}" (this project's setting).`,
+          ),
+      },
+      run: (args) => {
+        const task = own(args.id);
+        const text = String(args.text ?? '');
+        if (!text.trim()) throw new Error('The message is empty');
+        if (args.permission_mode) host.setSubagentPermission(bot, task.id, args.permission_mode as PermissionMode);
+        return summary(host.tasks.sendMessage(task.id, text, 'lead'), host.tasks);
+      },
     },
     {
       name: 'answer_subagent',
