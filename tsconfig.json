@@ -13,5 +13,5 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true
   },
-  "include": ["src/core", "src/shared", "src/desktop/main", "src/desktop/preload", "test", "scripts"]
+  "include": ["src/core", "src/shared", "src/desktop/main", "src/desktop/preload", "src/headless", "test", "scripts"]
 }

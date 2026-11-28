@@ -596,3 +596,66 @@ of the built AppImage finds a made-up release 99.0.0 served from localhost
 (`CODE_BOT_UPDATE_FEED`, honoured only for localhost addresses), downloads and
 checks it, replaces itself and starts again. The first real update this way is
 from the first release that has it to the one after.
+
+## 36. Headless: one core per data folder, terminals are clients over local HTTP (2026-11-27)
+
+**Decided:** `code-bot serve` runs the orchestrator without a window
+(`src/headless`), with the same start-up as the desktop app (`createCore` in
+`src/core/boot.ts`) and the same operation table (`src/core/operations.ts`).
+It listens on 127.0.0.1 with a token from the data folder. `code-bot chat`,
+`code-bot panes` and the other commands are clients; the first one that needs
+the core starts `serve` in the background, the way tmux starts its server. A
+lock in the data folder (`data/instance.json`) allows one core per folder,
+desktop app or server, and tells clients the port. The headless default data
+folder is the desktop app's, so on one machine both see the same bots (one at a
+time).
+
+**Why:** the owner wants code-bot on a VM with no window, used from a terminal
+over SSH (also from the phone) and, later, from other assistants over MCP. One
+process must own the database, the routines and the sub-agents; terminals come
+and go. HTTP on 127.0.0.1 works the same on Windows and Linux, and is what the
+MCP adapter (2.3) and the desktop app as a remote window (2.4) will use.
+
+**Rejected:** a core in every terminal pane (two cores on one database would
+both run routines and resume sub-agents); driving interactive `claude` sessions
+in tmux with `send-keys` and reading the screen, as some tmux orchestrators do
+(it breaks when the screen changes, and approvals could not reach the user's
+conversation); a Unix socket (not on Windows the same way, and not reusable for
+the later remote clients).
+
+Verified: `scripts/headless-check.ts` on Windows and in WSL (with tmux), and
+`test/headless.test.ts`, `test/terminal.test.ts`.
+
+## 37. The service runs as the owner's own user (2026-11-27)
+
+**Decided (owner's choice):** `code-bot service install` keeps the server
+running as the user who installs it. On Linux it writes a systemd user unit
+(`~/.config/systemd/user/code-bot.service`) with the install shell's `PATH` and
+a `TZ`, restarting after a crash, and prints `sudo loginctl enable-linger
+<user>` (needed to start at boot and keep running after logout) instead of
+running sudo itself. On Windows it puts a small starter in the user's Startup
+folder that runs code-bot hidden at sign-in through a script that starts it
+again after a crash, but not after `code-bot stop`.
+
+**Why:** sub-agents must use the machine as the owner does (requirement 1): their
+checkouts, `.env` files, git keys and the Claude Code and Codex sign-ins. A
+dedicated service user would need all of those again. On Windows, a Scheduled
+Task at sign-in needs administrator rights, and one that runs with nobody
+signed in needs the user's Windows password, which code-bot must not handle
+(requirement 8); the owner can set that up in Task Scheduler themselves.
+
+**Time zone:** routines run in the core's local time (decision 30). An Azure VM
+runs on UTC by default, so install warns on UTC and takes `--tz <zone>`.
+
+## 38. Agent text is stripped of control characters in terminals (2026-11-27)
+
+**Decided:** everything a bot, sub-agent, tool or file produced passes through
+`clean` (`src/headless/render.ts`) before the terminal client prints it: escape
+sequences (CSI, OSC, DCS and the rest), C0 controls except tab and newline, DEL,
+C1 controls and the bidirectional overrides are removed.
+
+**Why:** the terminal version of "agent output is untrusted" (the window renders
+it only as React text). Raw escape sequences from an agent could clear or
+rewrite what the user sees, change the title, write the clipboard (OSC 52) or
+show a link that goes elsewhere (OSC 8). code-bot's own colours and title are
+added after cleaning.

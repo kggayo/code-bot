@@ -49,15 +49,16 @@ them away for convenience.
 5. A project bot can run several sub-agents at once. New work never waits for
    other work to finish.
 6. Desktop first: an Electron app for Windows, macOS and Linux. Mobile is
-   dropped for now. Milestone 1 (the desktop app) is done; the next milestone
-   exposes the main bot over an API or MCP so it can run on the owner's Azure VM
-   (`docs/roadmap.md`). The owner has no Mac: macOS stays unverified.
+   dropped for now. Milestone 1 (the desktop app) is done. Milestone 2 runs the
+   main bot on the owner's Azure VM and exposes it over an API or MCP
+   (`docs/roadmap.md`). Its first part, the headless `code-bot` command with a
+   terminal client, is built. The owner has no Mac: macOS stays unverified.
 7. Coding agents are pluggable. Claude Code is the first engine; others must be
    addable without touching the orchestrator core.
 8. Model usage is paid through the owner's Claude subscription login on the
    machine. code-bot never handles credentials.
 
-## Status (as of 2026-11-26)
+## Status (as of 2026-11-27)
 
 Milestone 1 is complete on Windows 11 and Linux (Ubuntu 24.04 in WSL2). Built
 and verified:
@@ -75,7 +76,8 @@ and verified:
 | Desk improvements (0.4.0, 2026-11-26): one developer per piece of work (roles, `for_subagent`, permission changes, recent sub-agents in each message), plan limits and costs, routines, resizable panes, activity indicators, readable approvals, answered cards, taskbar badge, update button, sharper icon | `npm test`: 56 tests on Windows, and on Windows and Linux in CI (`test/work.test.ts` covers roles, follow-ups, permissions, usage, limit parsing, schedules and routine runs). `npm run e2e`: 17 checks on Windows, and on Windows and Linux in CI, in a 1024x768 window like GitHub's runners and in the smallest window (approval as a command, main bot's project-bot panel and activity strip, answered card, working sub-agent strip, routines, resizing, plan limits, Updates section). `npm run live` (Claude haiku, 7 steps) and `scripts/packaged-check.ts` pass on Windows. The plan-limit calls were tried against real Claude Code (Max) and Codex 0.160.1 by hand. Not verified: installing an update (needs a release newer than 0.4.0), the taskbar badge and flashing (native). |
 | MCP servers per project (0.5.0, 2026-11-26): added in a project bot's settings, passed to its sub-agents at every run (decision 32) | `npm test`: 62 tests on Windows (`test/mcp.test.ts`: checking, the Windows launch rule, Claude and Codex options, command lines, saved and passed at every turn, the project bot's prompt). `npm run e2e`: 18 checks on Windows (add a server, a broken address refused with the reason, kept on reopening, a sub-agent receives it). `npm run live` (above): Claude Code and Codex sub-agents call a local MCP server from the settings. Both agents start a server through `cmd /c` (checked by hand against Codex 0.160.1 and Agent SDK 0.3.325). Not verified: Linux, an HTTP server, `npx @playwright/mcp` itself. |
 | Finishing Milestone 1 (0.5.0, 2026-11-26): merge or push a sub-agent's branch from its panel (decision 33), routines proposed by bots and created by the user (decision 34), the AppImage updating itself (decision 35), MCP tokens from a named environment variable (decision 32) | `npm test`: 71 tests on Windows and in WSL (`test/branches.test.ts` with real git repositories: status, a refused merge on a dirty folder, a merge, a conflict left undone, a push to a bare remote, archiving while a check runs, GitHub remote forms; `test/proposals.test.ts`: proposing, creating once, dismissing, refused schedules, earlier conversations; token names and mapping in `test/mcp.test.ts`). `npm run e2e`: 20 checks on Windows (merge and push from the panel, a proposed routine created from its card). `npm run live` (above): a real sub-agent's branch merged from its panel, and a routine proposed by the main bot from a plain request. In WSL (Ubuntu 24.04): `npm test` (1 Windows-only test skipped), `npm run package:linux` and `scripts/appimage-update-check.ts`: the built AppImage finds a newer release served from localhost, replaces itself and restarts. Tokens checked by hand: Claude Code (Agent SDK 0.3.325) and Codex 0.160.1 reach a local HTTP MCP server that only answers the token from the named variable. Not verified: opening a real pull request with gh (pushing was), an update from a real release. |
-| CI on GitHub | `.github/workflows/build.yml` on `windows-latest` and `ubuntu-latest` (under a virtual display): typecheck, tests, end-to-end and installers, uploaded as artifacts. Passed on both for the first push to `main` (2026-11-17) and for pull request 1 (0.4.0, 2026-11-26), https://github.com/kggayo/code-bot/actions |
+| Headless and the terminal (Milestone 2.1, 2026-11-27; decisions 36-38): `code-bot serve` with an HTTP API on 127.0.0.1, `code-bot chat` (cards for questions, approvals and proposed routines, commands, title and bell, agent text stripped of control characters), `code-bot panes` (tmux or Windows Terminal), `export`/`import` with mapped folders, `service install` (systemd user unit, Windows sign-in start), one core per data folder (the desktop app takes the same lock) | `npm test`: 88 tests on Windows and in WSL (`test/headless.test.ts`: the operation table, the token and local-caller checks, the event stream with an approval answered over HTTP, the lock, export and import; `test/terminal.test.ts`: escape stripping, cards, commands, the chat answering an approval, a question and a proposed routine). `scripts/headless-check.ts` runs the real command in separate processes with scripted models: 8 steps on Windows, 10 in WSL with `--tmux` (panes per bot titled by their chats, a message typed into the main bot's pane answered there). `npm run e2e` (20 checks) still passes after the desktop app moved to the shared start-up and operation table. `scripts/headless-live-check.ts` (Claude haiku, Windows, 5 steps): through `code-bot chat`, the main bot gets an answer from the project bot's CLAUDE.md, and a sub-agent's approval comes to the main bot's chat, is answered with `/allow`, and its output is relayed. `scripts/service-check.ts`: systemd user unit in WSL and the Startup-folder start on Windows, each installed, restarted after its process was killed, stopped for good by `code-bot stop`, and removed. Not verified: starting at boot (needs `loginctl enable-linger`, sudo) and at a real Windows sign-in, Windows Terminal panes, the desktop app's dialog when the server holds its folder, an Azure VM. |
+| CI on GitHub | `.github/workflows/build.yml` on `windows-latest` and `ubuntu-latest` (under a virtual display): typecheck, tests, the headless check (with tmux on Linux), end-to-end and installers, uploaded as artifacts. Passed on both for the first push to `main` (2026-11-17) and for pull request 1 (0.4.0, 2026-11-26), https://github.com/kggayo/code-bot/actions |
 | Linux AppImage and deb | Built in WSL with `npm run package:linux`; `scripts/packaged-check.ts` against `release/linux-unpacked`: starts and its sign-in check runs the unpacked Claude Code. The model turn was skipped: Claude Code in WSL was not signed in (its April login had expired) |
 
 Not verified: macOS (no Mac), `npm run live` on Linux (needs `claude auth login`
@@ -96,6 +98,10 @@ npm run typecheck    # tsconfig.json (core, main, preload, tests) + tsconfig.web
 npm test             # core tests: no Electron, no model usage
 npm run e2e          # builds, then drives the app with scripted models (Playwright)
 npm run live         # builds, then drives the app with real Claude (haiku); uses model usage
+node bin/code-bot.cjs  # the headless command from source (npm link puts it on the PATH as code-bot)
+node scripts/headless-check.ts [--tmux]  # drives the code-bot command with scripted models (tmux: Linux)
+node scripts/headless-live-check.ts      # the code-bot command with real Claude (haiku); uses model usage
+node scripts/service-check.ts            # code-bot service install for real in a temp folder, then removes it
 npm run package      # installer for the current platform into release/
 npx electron-builder --dir --publish never && node scripts/packaged-check.ts   # quick check of a packaged build
 node scripts/codex-check.ts          # the Codex engine against real Codex (uses Codex usage)
@@ -144,6 +150,7 @@ Environment variables (read by `src/desktop/main/index.ts` and the engines):
 | `CODE_BOT_CODEX_EXECUTABLE` | Use this Codex binary instead of `codex` on the PATH. |
 | `CODE_BOT_NO_QUIT_PROMPT=1` | Quit without asking even while sub-agents work (tests). |
 | `CODE_BOT_NO_UPDATE_CHECK=1` | Never look for a newer release by itself (demo mode never does either). |
+| `CODE_BOT_PORT` | The headless server's port on 127.0.0.1 (default 7413; 0 picks a free one). |
 | `CODE_BOT_UPDATE_FEED` | Ask this localhost address for the newest release instead of GitHub (`scripts/appimage-update-check.ts`); ignored unless it is `http://127.0.0.1` or `http://localhost`. |
 
 Claude Code must be signed in on the machine for real use. The app checks on
@@ -180,7 +187,9 @@ file). A failed run leaves no release: fix, move the tag
 | Path | What |
 |---|---|
 | `src/core/` | The orchestrator. No Electron imports: it must stay runnable headless. Start with `code-bot.ts`; `tasks.ts` runs sub-agents, `worktrees.ts` their git worktrees, `routines.ts` routine schedules, `mcp.ts` a project's MCP servers, `branches.ts` merging or pushing a sub-agent's branch, `engines/` the coding agents (`claude.ts`, `codex.ts`, `mock.ts`). |
-| `src/shared/types.ts` | Every type shared by core, main, preload and renderer, including `CodeBotApi` and the event shapes. |
+| `src/shared/types.ts` | Every type shared by core, main, preload and renderer, including `CodeBotApi` and the event shapes. `src/shared/format.ts`: words for states, schedules, tools and approvals, used by the window and the terminal. |
+| `src/core/operations.ts`, `boot.ts`, `instance.ts` | The operation table (argument schemas and handlers) for IPC and HTTP; starting the core for a data folder; the data folder's lock. |
+| `src/headless/` | The `code-bot` command (`cli.ts`; launcher `bin/code-bot.cjs`): the server (`serve.ts`, `server.ts`), its client (`client.ts`, `daemon.ts`), the terminal chat (`chat.ts`, `render.ts`), panes (`panes.ts`), export and import (`transfer.ts`), services (`service.ts`). No Electron. |
 | `src/desktop/main/` | Electron main process: window, IPC (`ipc.ts`), terminals (`terminal.ts`), the taskbar badge (`badge.ts`), updates (`updates.ts`), quit handling. |
 | `src/desktop/preload/` | The `window.codeBot` bridge. |
 | `src/desktop/renderer/` | The React interface. `src/state.ts` is the window's state; `src/components/` the views. |
@@ -189,6 +198,7 @@ file). A failed run leaves no release: fix, move the tag
 | `scripts/packaged-check.ts` | Starts the packaged app from `release/` and runs one real model turn, proving it finds its unpacked Claude Code. |
 | `scripts/codex-check.ts`, `scripts/auto-mode-check.ts` | Live checks of the Codex engine and of Claude Code's `auto` mode. |
 | `scripts/make-icons.mjs`, `build/` | The app icon: `build/icon.svg`, `build/icon-small.svg` (16-32 px) and the PNG/ICO files made from them. |
+| `scripts/headless-check.ts`, `scripts/headless-live-check.ts`, `scripts/service-check.ts` | The `code-bot` command in separate processes: with scripted models (and tmux with `--tmux`), with real Claude, and `service install` (systemd or the Windows Startup folder; refuses when a code-bot service is already installed, and removes its own). |
 | `scripts/wsl-sync.sh` | Copies the checkout into WSL for Linux builds and checks. |
 | `scripts/appimage-update-check.ts` | On Linux: a copy of the built AppImage updates itself from a made-up release served from localhost, and restarts. |
 | `.github/workflows/build.yml` | CI for Windows and Linux on every push to `main` and every pull request: typecheck, tests, end-to-end, installers (as artifacts). |
@@ -210,13 +220,17 @@ file). A failed run leaves no release: fix, move the tag
 - **Few dependencies.** Runtime (shipped) dependencies are the Claude Agent SDK
   and zod. Renderer libraries are bundled by Vite and are dev dependencies. Add
   one only when the alternative is clearly worse.
-- **Every IPC method is validated.** A new `CodeBotApi` method needs its type in
-  `src/shared/types.ts`, an argument schema and a handler in
-  `src/desktop/main/ipc.ts`, and a line in `docs/api.md`.
+- **Every operation is validated.** A new `CodeBotApi` method needs its type in
+  `src/shared/types.ts`, an argument schema in `src/core/operations.ts` (`ARGS`),
+  a handler there (`coreHandlers`) or, for desktop-only ones, in
+  `src/desktop/main/ipc.ts` and `DESKTOP_ONLY`, and a line in `docs/api.md`.
+  The HTTP server picks it up from the table.
 - **Agent output is untrusted.** In the renderer it is rendered only as React
   text or through `MarkdownText` (raw HTML skipped). Never use
   `dangerouslySetInnerHTML`. The built page's Content-Security-Policy allows no
-  inline script or style and no network.
+  inline script or style and no network. In a terminal it is printed only
+  through `clean` (`src/headless/render.ts`), which removes escape sequences and
+  control characters.
 - **Bots never get tools that change things.** The main bot has only its routing
   tools; project bots add Read, Grep, Glob and read-only git. Changes go through
   sub-agents. Text from sub-agents, files and tools reaches bots between `<<<`
@@ -325,6 +339,21 @@ file). A failed run leaves no release: fix, move the tag
   cannot remove a folder while the window's git status runs in it. Every git
   command code-bot or a bot runs uses `--no-optional-locks`, so a status check
   never holds the index lock while a sub-agent (or a test) commits.
+- **One core per data folder.** The desktop app and `code-bot serve` both take
+  `data/instance.json` (`src/core/instance.ts`) before opening the database, and
+  both default to the same folder. Tests that start a server use a temporary
+  `userData`; `test/helpers.ts` builds a `CodeBot` without the lock.
+- **The headless code runs from the checkout.** Node 24 strips types only
+  outside `node_modules`, so `bin/code-bot.cjs` imports `src/headless/cli.ts`
+  from the checkout (`npm link` keeps that). The launcher is plain old
+  JavaScript so that an old Node prints a version message instead of a syntax
+  error; it also hides node:sqlite's experimental warning.
+- **JSON has no `undefined`.** `Client.call` drops trailing `undefined`
+  arguments; a `null` in their place fails the schemas.
+- **tmux targets:** `has-session`, `kill-session` and `new-window` take `=name`
+  for an exact session match, but `set-option -t` reads a pane target and needs
+  the plain name. Windows are named (`bots`, `bots-2`), never numbered, because
+  the user's `base-index` may be 1.
 - **Dialog fieldsets need `min-width: 0`** (already in `styles.css`): by
   default a fieldset is as wide as its widest content, and a long folder path
   pushed the settings dialog sideways.

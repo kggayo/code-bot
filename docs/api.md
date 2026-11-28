@@ -2,10 +2,11 @@
 
 The window and the orchestrator talk through one interface, `CodeBotApi` in
 `src/shared/types.ts`, and one event stream of `CoreEvent`s. In the desktop app
-the window calls the operations over IPC (`window.codeBot.call(method, args)`,
-validated in `src/desktop/main/ipc.ts`) and receives every event on the
-`code-bot:event` channel. A future remote client (HTTP or MCP, see
-`docs/roadmap.md`) should expose the same operations and events.
+the window calls the operations over IPC (`window.codeBot.call(method, args)`)
+and receives every event on the `code-bot:event` channel. The headless server
+(`code-bot serve`) offers the same operations and events over HTTP; see "HTTP"
+below. Both check arguments with the same table, `src/core/operations.ts`. MCP
+for assistants (`docs/roadmap.md`, 2.3) is to use the same operations.
 
 Errors are thrown as `Error` with a message meant for the user. In the core they
 are `CodeBotError` with a `code`: `invalid`, `not_found`, `conflict` or `busy`.
@@ -209,6 +210,29 @@ id (`scope: bot`) or `"app"` (`scope: app`).
 For questions, `answers` maps each question's exact text to the chosen option
 label or free text; several labels for a multi-select question are joined with
 `, `.
+
+## HTTP (the headless server)
+
+`code-bot serve` (`src/headless/server.ts`) listens on `127.0.0.1` only, on port
+7413 by default (`--port`, `CODE_BOT_PORT`; 0 picks a free one). The data
+folder's `data/instance.json` names the port and process, and `data/api-token`
+holds the token. Every request needs `Authorization: Bearer <token>`. A request
+with an `Origin` header, or with a `Host` other than `127.0.0.1:<port>` or
+`localhost:<port>`, is refused with 403. Bodies are JSON (`content-type:
+application/json`), at most 1 MB.
+
+| Route | Does |
+|---|---|
+| `POST /api/<method>` | One operation of the table above. The body is its argument list, e.g. `["main", "hello"]` for `sendToBot` (leave out trailing optional arguments; `null` is not "left out"). Answers `{ "ok": true, "result": … }` (`null` for none). Desktop-only operations answer 404. |
+| `GET /api/events` | Server-sent events: first `event: ready` with the server's status, then every `CoreEvent` as `data: <json>`, and a `: ping` comment every 15 seconds. Nothing is replayed: after connecting (or reconnecting), read what was missed with `getThread(botId, after)` or `getTask(taskId, after)` from the last `seq` seen, as the window does. |
+| `GET /server/status` | `{ version, pid, port, dataDir, fakeModels, startedAt, activeSubagents }`. |
+| `POST /server/stop` | Stops the server after answering (bots and sub-agents stop as on quitting the desktop app, and stay resumable). |
+| `POST /server/launch` | `{ "taskId": "t_…" }` → `{ command, args, cwd }`: the command that continues a stopped sub-agent's session in a terminal on this machine (the terminal client's `/open`). Same rules as `openInTerminal`. |
+
+Errors answer `{ "ok": false, "code": "…", "message": "…" }`: `invalid` 400,
+`unauthorized` 401, `forbidden` 403, `not_found` 404, `conflict` 409, `busy`
+423, `internal` 500. `Client` in `src/headless/client.ts` implements
+`CodeBotApi` over these routes.
 
 ## Thread events (`scope: "thread"`)
 

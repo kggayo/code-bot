@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import type { ClosedData, PendingRequest, UserResponse } from '../../../../shared/types.ts';
 import { state } from '../state.ts';
-import { RequestDetails, approvalTitle } from './RequestDetails.tsx';
+import { approvalTitle } from '../../../../shared/format.ts';
+import { RequestDetails } from './RequestDetails.tsx';
 import { TaskChip } from './Text.tsx';
 
 interface Question {

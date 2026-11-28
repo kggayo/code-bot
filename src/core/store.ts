@@ -309,7 +309,24 @@ function routineValues(routine: Routine): Record<string, SqlValue> {
 export class Store {
   private readonly db: DatabaseSync;
 
-  constructor(dataDir: string) {
+  /**
+   * `readOnly` opens an existing database without changing it (no migrations),
+   * e.g. to export bots while another code-bot has it open.
+   */
+  constructor(dataDir: string, options: { readOnly?: boolean } = {}) {
+    if (options.readOnly) {
+      this.db = new DatabaseSync(join(dataDir, 'code-bot.db'), { readOnly: true });
+      const { user_version: version } = this.db.prepare('PRAGMA user_version').get() as { user_version: number };
+      if (version !== SCHEMA_VERSION) {
+        this.db.close();
+        throw new Error(
+          version > SCHEMA_VERSION
+            ? 'This database was written by a newer version of code-bot. Update code-bot first.'
+            : 'This database is from an older code-bot. Start code-bot once to update it, then try again.',
+        );
+      }
+      return;
+    }
     mkdirSync(dataDir, { recursive: true });
     this.db = new DatabaseSync(join(dataDir, 'code-bot.db'));
     this.db.exec('PRAGMA journal_mode = WAL;');

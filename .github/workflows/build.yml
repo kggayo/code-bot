@@ -37,6 +37,16 @@ jobs:
 
       - run: npm test
 
+      - name: Headless check (the code-bot command, with tmux)
+        if: runner.os == 'Linux'
+        run: |
+          command -v tmux || (sudo apt-get update && sudo apt-get install -y tmux)
+          node scripts/headless-check.ts --tmux
+
+      - name: Headless check (the code-bot command)
+        if: runner.os == 'Windows'
+        run: node scripts/headless-check.ts
+
       - name: End-to-end check (Linux, virtual display)
         if: runner.os == 'Linux'
         run: |

@@ -1,6 +1,6 @@
 # code-bot
 
-A desktop code orchestrator for Windows and Linux (macOS builds, untested). You talk to one
+A code orchestrator for Windows and Linux, as a desktop app or a terminal command (macOS builds, untested). You talk to one
 **main bot**, or to a **project bot**, and never have to manage the coding
 agents that do the work:
 
@@ -80,6 +80,43 @@ Then sign in to Claude (see [Signing in](#signing-in)), click
 routes by them), add the project's folder(s), choose models, effort and
 permissions, and talk to it or to the main bot. Projects whose sub-agents use
 their own git worktrees need git on the PATH.
+
+## Headless, in a terminal
+
+The same bots without a window, for a server or a VM you reach over SSH (also
+from a phone): the `code-bot` command, on Windows and Linux. It runs from a git
+checkout with Node 24 or newer:
+
+```bash
+git clone https://github.com/kggayo/code-bot.git && cd code-bot
+npm ci
+npm link              # puts the code-bot command on your PATH
+code-bot login claude # once, if Claude Code is not signed in for this user
+code-bot              # talk to the main bot
+```
+
+- `code-bot` starts code-bot in the background the first time and opens a chat
+  with the main bot. `code-bot chat <bot>` opens a chat with a project bot.
+  Closing the terminal leaves the bots and sub-agents working.
+- `code-bot panes` opens a pane per bot: the main bot on the left, the project
+  bots on the right. It uses tmux on Linux and Windows Terminal on Windows.
+- In a chat, plain lines go to the bot. Questions and approvals from
+  sub-agents appear as numbered cards, answered with `/allow 1`, `/deny 1` or
+  `/answer 2`. `/help` lists the rest (`/subagents`, `/show`, `/merge`,
+  `/push`, `/routines` …).
+- `code-bot bot new` creates a project bot: its settings open in your editor.
+  To bring your bots from another machine:
+  - there: `code-bot export bots.json`;
+  - here: `code-bot import bots.json --map "C:\src=/home/me/src"`.
+- `code-bot service install` keeps it running as you:
+  - on Linux, a systemd user service (add `--tz Asia/Manila` on a server that
+    runs on UTC, so routines run at your times);
+  - on Windows, a hidden start at sign-in.
+- `code-bot status` and `code-bot stop` check on it and stop it. `code-bot help`
+  lists every command.
+
+The desktop app and the command use the same data folder by default, so they
+see the same bots, but only one of them can run at a time.
 
 ## Run from source
 

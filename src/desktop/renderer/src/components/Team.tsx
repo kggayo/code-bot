@@ -1,5 +1,5 @@
 import type { BotView } from '../../../../shared/types.ts';
-import { folderLabel, usageLine } from '../format.ts';
+import { folderLabel, usageLine } from '../../../../shared/format.ts';
 import { useAppState } from '../state.ts';
 
 /** What a project bot is doing, in a few words. */

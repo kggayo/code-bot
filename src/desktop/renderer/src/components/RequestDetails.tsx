@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import type { PendingRequest } from '../../../../shared/types.ts';
-import { basename } from '../format.ts';
+import { basename } from '../../../../shared/format.ts';
 import { MarkdownText } from './Text.tsx';
 
 type Input = Record<string, unknown>;
@@ -8,38 +8,6 @@ type Input = Record<string, unknown>;
 const str = (value: unknown): string => (typeof value === 'string' ? value : '');
 const records = (value: unknown): Input[] =>
   Array.isArray(value) ? value.filter((item): item is Input => Boolean(item) && typeof item === 'object' && !Array.isArray(item)) : [];
-
-/** What the agent wants to do, in a few words, by tool. */
-export function approvalTitle(request: PendingRequest): string {
-  const input = (request.input ?? {}) as Input;
-  switch (request.tool) {
-    case 'ExitPlanMode':
-      return 'Approve the plan';
-    case 'Bash':
-    case 'PowerShell':
-    case 'shell':
-      return 'Run a command';
-    case 'Write':
-      return `Write ${basename(str(input.file_path)) || 'a file'}`;
-    case 'Edit':
-    case 'MultiEdit':
-      return `Edit ${basename(str(input.file_path)) || 'a file'}`;
-    case 'NotebookEdit':
-      return `Edit ${basename(str(input.notebook_path)) || 'a notebook'}`;
-    case 'apply_patch': {
-      const changes = records(input.changes);
-      return changes.length === 1 ? `Change ${basename(str(changes[0]?.path))}` : `Change ${changes.length || 'some'} files`;
-    }
-    case 'WebFetch':
-      return 'Open a web page';
-    case 'WebSearch':
-      return 'Search the web';
-    case 'permissions':
-      return 'More access than the sandbox allows';
-    default:
-      return request.tool.startsWith('mcp__') ? `Use ${request.tool.replace(/^mcp__/, '').replace(/__/g, ' · ')}` : `Use ${request.tool}`;
-  }
-}
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (

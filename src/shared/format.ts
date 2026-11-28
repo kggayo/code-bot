@@ -1,4 +1,9 @@
-import type { Bot, BotUsage, PermissionMode, RoutineSchedule, SubagentRole, TaskState } from '../../../shared/types.ts';
+import type { Bot, BotUsage, PendingRequest, PermissionMode, RoutineSchedule, SubagentRole, TaskState } from './types.ts';
+
+/**
+ * Words for what code-bot shows: used by the desktop window and the terminal
+ * client (src/headless), so both describe things the same way.
+ */
 
 export const ROLE_LABEL: Record<SubagentRole, string> = {
   developer: 'Developer',
@@ -179,3 +184,41 @@ export function describeAgentTool(name: string, input: unknown): string {
   const detail = str(args.command) || str(args.pattern) || str(args.url) || str(args.query) || str(args.description);
   return detail ? `${name} ${clip(detail, 140)}` : name;
 }
+
+const records = (value: unknown): Record<string, unknown>[] =>
+  Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+    : [];
+
+/** What the agent wants to do, in a few words, by tool. */
+export function approvalTitle(request: PendingRequest): string {
+  const input = (request.input ?? {}) as Record<string, unknown>;
+  switch (request.tool) {
+    case 'ExitPlanMode':
+      return 'Approve the plan';
+    case 'Bash':
+    case 'PowerShell':
+    case 'shell':
+      return 'Run a command';
+    case 'Write':
+      return `Write ${basename(str(input.file_path)) || 'a file'}`;
+    case 'Edit':
+    case 'MultiEdit':
+      return `Edit ${basename(str(input.file_path)) || 'a file'}`;
+    case 'NotebookEdit':
+      return `Edit ${basename(str(input.notebook_path)) || 'a notebook'}`;
+    case 'apply_patch': {
+      const changes = records(input.changes);
+      return changes.length === 1 ? `Change ${basename(str(changes[0]?.path))}` : `Change ${changes.length || 'some'} files`;
+    }
+    case 'WebFetch':
+      return 'Open a web page';
+    case 'WebSearch':
+      return 'Search the web';
+    case 'permissions':
+      return 'More access than the sandbox allows';
+    default:
+      return request.tool.startsWith('mcp__') ? `Use ${request.tool.replace(/^mcp__/, '').replace(/__/g, ' · ')}` : `Use ${request.tool}`;
+  }
+}
+

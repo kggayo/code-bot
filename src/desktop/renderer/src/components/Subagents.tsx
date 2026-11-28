@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useState } from 'react';
 import { ACTIVE_STATES } from '../../../../shared/types.ts';
 import type { BotView, BranchStatus, ClosedData, CoreEvent, PendingRequest, Task } from '../../../../shared/types.ts';
 import { api } from '../api.ts';
-import { ROLE_LABEL, STATE_LABEL, ago, basename, describeAgentTool, money, tokens, usageLine } from '../format.ts';
+import { ROLE_LABEL, STATE_LABEL, ago, basename, describeAgentTool, money, tokens, usageLine } from '../../../../shared/format.ts';
 import { useAppState } from '../state.ts';
 import { Composer } from './Composer.tsx';
 import { useStickToBottom } from './Conversation.tsx';

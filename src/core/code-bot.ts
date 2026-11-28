@@ -126,7 +126,8 @@ function wholeNumber(value: unknown, min: number, max: number, what: string): nu
   return number;
 }
 
-function defaultSubagents(engine: string): SubagentDefaults {
+/** Sub-agent settings of a new project bot. */
+export function defaultSubagents(engine: string): SubagentDefaults {
   return {
     engine,
     model: null,

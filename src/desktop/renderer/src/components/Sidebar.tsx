@@ -1,5 +1,5 @@
 import type { BotView } from '../../../../shared/types.ts';
-import { describeSchedule, folderLabel, until, when } from '../format.ts';
+import { describeSchedule, folderLabel, until, when } from '../../../../shared/format.ts';
 import { useAppState } from '../state.ts';
 import { UsageMeter } from './Usage.tsx';
 
