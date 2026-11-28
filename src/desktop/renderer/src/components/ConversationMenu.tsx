@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { BotView, ConversationSummary } from '../../../../shared/types.ts';
 import { api } from '../api.ts';
-import { ago } from '../format.ts';
+import { ago } from '../../../../shared/format.ts';
 import { useAppState } from '../state.ts';
 
 /** A bot's conversations: open an earlier one to read it, archive old ones. */

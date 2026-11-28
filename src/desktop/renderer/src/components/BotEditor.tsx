@@ -3,7 +3,7 @@ import { joinCommandLine, splitCommandLine } from '../../../../shared/command-li
 import { DEFAULT_WORKTREE_FILES, EFFORTS, PERMISSION_MODES } from '../../../../shared/types.ts';
 import type { BotInput, BotView, Effort, Isolation, McpServer, PermissionMode } from '../../../../shared/types.ts';
 import { api } from '../api.ts';
-import { PERMISSION_LABEL } from '../format.ts';
+import { PERMISSION_LABEL } from '../../../../shared/format.ts';
 import { useAppState } from '../state.ts';
 import type { Editor } from '../state.ts';
 

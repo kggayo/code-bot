@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 import type { UsageWindow } from '../../../../shared/types.ts';
-import { ago, until, when } from '../format.ts';
+import { ago, until, when } from '../../../../shared/format.ts';
 import { useAppState } from '../state.ts';
 
 /** normal, warning or critical: the agent's own reading, else by how full the window is. */

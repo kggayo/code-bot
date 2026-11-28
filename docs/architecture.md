@@ -1,9 +1,11 @@
 # Architecture
 
-code-bot is an Electron desktop app. The main process hosts the whole
-orchestrator (bots, sub-agents, database); the window is a React interface that
-talks to it only over IPC. The orchestrator itself (`src/core`) knows nothing
-about Electron, so the same code can later run headless on a server.
+code-bot is an Electron desktop app and a headless command. In the app, the
+main process hosts the whole orchestrator (bots, sub-agents, database) and the
+window is a React interface that talks to it only over IPC. Headless,
+`code-bot serve` hosts the same orchestrator without a window, and terminals
+talk to it over HTTP on 127.0.0.1 (see "Headless and the terminal" below). The
+orchestrator itself (`src/core`) knows nothing about Electron.
 
 ```
  ┌────────── window (renderer, sandboxed) ───────────┐
@@ -78,8 +80,21 @@ sub-agent (but can open one and write to it).
 | `src/core/git.ts` | Read-only git runner for project bots. |
 | `src/core/store.ts` | SQLite persistence (`node:sqlite`, synchronous). Tables `bots`, `threads`, `tasks`, `events`, `requests`, `settings`. Schema version in `PRAGMA user_version`, upgraded by the `MIGRATIONS` list. |
 | `src/core/util.ts` | `CodeBotError`, ids, truncation helpers. |
-| `src/desktop/main/index.ts` | Electron main process: data folder, engines and brain selection, window, quit handling, single instance. |
-| `src/desktop/main/ipc.ts` | The IPC handler: sender check, argument validation for every method, desktop-only methods (folder picker, notifications, open link/folder, terminals, updates). |
+| `src/core/boot.ts` | `createCore`: the store, engines, brain and `CodeBot` for a data folder, shared by the desktop app and the headless server; `defaultUserData` (the desktop app's folder). |
+| `src/core/operations.ts` | The operation table: a zod schema for every `CodeBotApi` method's arguments, the handlers the core answers itself (`coreHandlers`), which ones are desktop-only, and `callOperation`. Used by `ipc.ts` and the HTTP server. |
+| `src/core/instance.ts` | The data folder's lock (`data/instance.json`): one core per data folder, desktop or headless. It also tells terminals the server's port. |
+| `src/shared/format.ts` | Words for what code-bot shows (states, schedules, tools, approvals, money), used by the window and the terminal. |
+| `src/headless/server.ts` | The HTTP API: `POST /api/<method>`, `GET /api/events` (server-sent events), `/server/status`, `/server/stop`, `/server/launch`; the token and local-caller checks. |
+| `src/headless/serve.ts` | `runServer`: takes the lock, makes the token, starts the core and the HTTP server, and stops them cleanly. |
+| `src/headless/client.ts` | `Client`: `CodeBotApi` over HTTP, and the event stream with reconnects. `findServer` reads the lock. |
+| `src/headless/daemon.ts` | Starts `code-bot serve` in the background when a command needs it (detached, logging to `data/server.log`). |
+| `src/headless/chat.ts`, `render.ts` | The terminal conversation (`code-bot chat`): cards for requests and routine proposals, commands, the title and the bell. `render.ts` strips control characters from everything an agent wrote. |
+| `src/headless/panes.ts` | `code-bot panes`: a tmux session or a Windows Terminal window with a pane per bot; `/open` in a new tmux window or tab. |
+| `src/headless/transfer.ts` | `code-bot export` and `import`: bots, the main bot's settings and routines, with folders mapped. |
+| `src/headless/service.ts` | `code-bot service install`: a systemd user unit on Linux, a hidden start at sign-in on Windows. |
+| `src/headless/cli.ts`, `bin/code-bot.cjs` | The `code-bot` command and its launcher (checks for Node 24, hides node:sqlite's experimental warning). |
+| `src/desktop/main/index.ts` | Electron main process: the data folder's lock, `createCore`, the window, quit handling, single instance. |
+| `src/desktop/main/ipc.ts` | The IPC handler: the sender check, the shared operation table, and the desktop-only methods (folder picker, notifications, open link or folder, terminals, updates). |
 | `src/desktop/main/badge.ts` | The waiting count on the taskbar or dock icon: an overlay badge drawn pixel by pixel on Windows, the dock badge on macOS, the launcher count on Linux. |
 | `src/desktop/main/updates.ts` | `Updater`: asks GitHub for the newest release, downloads and checks the Windows installer and starts it, or replaces a Linux AppImage and restarts. |
 | `src/desktop/main/terminal.ts` | Opens a terminal window running one program (sign-in, continuing a session) on Windows, macOS and Linux. |
@@ -555,6 +570,46 @@ cut. The event names and shapes are a public contract; they are listed in
   questions and approvals wait (`badge.ts`), and the taskbar button flashes
   when one arrives while the window is not focused.
 
+## Headless and the terminal
+
+`code-bot serve` runs the orchestrator without a window: `createCore` as in the
+desktop app, plus an HTTP server on 127.0.0.1 (`src/headless`). Everything else
+is a client of it:
+
+```
+ code-bot chat · code-bot chat web · code-bot panes (tmux / Windows Terminal)
+        │ POST /api/<method>            ▲ GET /api/events (server-sent events)
+        ▼                               │
+ ┌──────────────────────────────────────┴──────┐
+ │ code-bot serve: server.ts ─► operations.ts   │
+ │   ─► CodeBot (src/core), Store, engines       │
+ └──────────────────────────────────────────────┘
+```
+
+- **One core per data folder.** The desktop app and `serve` both take
+  `data/instance.json` first, and the second one is refused with the name of
+  who holds it. The headless default data folder is the desktop app's, so on
+  one machine both see the same bots, never at the same time.
+- **Started on demand.** A command that needs the core (`code-bot`, `chat`,
+  `bots`, `import` …) starts `serve` in the background when none runs, the way
+  tmux starts its server, and waits for `/server/status`. Terminals, panes and
+  SSH sessions come and go; the server and its sub-agents keep working.
+- **The chat** loads the conversation (`getThread`), then follows the stream.
+  After a reconnect it reads `getThread(botId, lastSeq)`, like the window.
+  Requests and routine proposals are numbered cards, answered with `/allow`,
+  `/deny`, `/answer` and `/create`; open ones are shown again when a chat opens.
+  The terminal title shows the bot's state (tmux shows it as the pane title),
+  and a bell rings for a new request.
+- **Panes.** `code-bot panes` opens tmux (or Windows Terminal) with the main bot
+  on the left and up to three project bots on the right, and more in further
+  windows. Each pane is `code-bot chat <bot>`.
+- **Services.** `code-bot service install` keeps `serve` running as the user:
+  a systemd user unit on Linux (with `PATH` and `TZ` from the install), or a
+  hidden start at sign-in on Windows (decision 37).
+- **Moving bots.** `code-bot export` reads the database read-only, so it works
+  while code-bot runs. `import` creates the bots and routines through the
+  running core, with folders mapped (`--map FROM=TO`).
+
 ## Security model
 
 - The window is sandboxed (`sandbox`, `contextIsolation`, no `nodeIntegration`),
@@ -592,3 +647,15 @@ cut. The event names and shapes are a public contract; they are listed in
 - MCP servers in a project's settings run as the user too. Their tools ask for
   approval unless the user ticked "Run its tools without asking" for that
   server, and always in plan mode. code-bot stores no keys or tokens for them.
+- The headless server listens on 127.0.0.1 only. Every request needs the token
+  in `data/api-token` (made at first start, readable only by the user), and the
+  comparison takes the same time whatever the token. Refused: a request with an
+  `Origin` header (any web page), and a `Host` other than 127.0.0.1 or localhost
+  with the server's port (DNS rebinding). Bodies are JSON, at most 1 MB, and
+  there are no CORS headers. The same operation table checks the arguments as
+  for the window, and desktop-only operations are refused.
+- In a terminal, every string from a bot, a sub-agent, a tool or a file has its
+  control characters and escape sequences removed before it is printed
+  (`clean` in `src/headless/render.ts`), so agent output cannot move the
+  cursor, retitle the terminal, write the clipboard or hide a link
+  (decision 38).

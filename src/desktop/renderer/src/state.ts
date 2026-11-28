@@ -23,7 +23,7 @@ import type {
   UserResponse,
 } from '../../../shared/types.ts';
 import { api } from './api.ts';
-import { clip } from './format.ts';
+import { clip } from '../../../shared/format.ts';
 
 /** One bot's current conversation, as far as the window has seen it. */
 export interface Conversation {

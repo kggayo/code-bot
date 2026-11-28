@@ -50,29 +50,39 @@ The owner's next milestone: run code-bot on the Azure VM so the PC can be off,
 and talk to the main bot from other assistants (Claude, ChatGPT/Codex, Grok)
 through API endpoints or MCP.
 
-### 2.1 Headless core on the VM
+### 2.1 Headless core and the terminal (built 2026-11-27)
 
-`src/core` already has no Electron imports. Add a headless entry point that
-creates `Store`, the engines, `ClaudeBrain` and `CodeBot`, plus a way to define
-project bots without the window (an import of bot definitions, or the API
-below). Run it as a service (systemd on Linux, a Windows service otherwise)
-under its own OS user, with Claude Code signed in for that user
-(`claude auth login`, or `claude setup-token` for `CLAUDE_CODE_OAUTH_TOKEN` on
-a machine without a browser; not yet tried). The VM needs Node 24, git, the
-project checkouts with their `.env` files, and their tooling.
+Built (decisions 36-38). The details are in `docs/architecture.md`, "Headless
+and the terminal":
+- `code-bot serve`, and the `code-bot` command that starts it in the background;
+- `code-bot chat`, and `code-bot panes` for tmux or Windows Terminal;
+- `export` and `import` with mapped folders;
+- `service install`: a systemd user unit, or a start at sign-in on Windows;
+- the HTTP API on 127.0.0.1 (`docs/api.md`, "HTTP").
+
+It runs from a git checkout on Node 24 (`npm ci`, then `npm link` for the
+command). It runs as the owner's user, with Claude Code signed in for that user:
+`code-bot login claude` runs `claude auth login`, which works over SSH. Not yet
+tried: `claude setup-token` for `CLAUDE_CODE_OAUTH_TOKEN`. The VM needs Node
+24, git, the project checkouts with their `.env` files, and their tooling.
+
+Still open here:
+- **An install without a checkout.** Node does not strip types under
+  `node_modules`, so an `npm install -g` package needs the headless code built
+  to JavaScript first. The Electron app could also serve as the Node that runs
+  it (`ELECTRON_RUN_AS_NODE`), as VS Code's `code` command does.
+- **Updating the headless install.** Today: `git pull`, `npm ci`, then restart
+  the service.
 
 ### 2.2 HTTP API
 
-Mirror `CodeBotApi` and the event stream. The first version (2026-11-16) did
-this and it worked; its design, worth reusing:
-
-- Bearer token on every route; the server listens on `127.0.0.1` and is reached
-  through a VPN or an authenticating HTTPS proxy, never an open port.
-- `POST` endpoints for the operations; `GET` with `?after=<seq>` for history.
-- Server-sent events for live updates, resuming from `Last-Event-ID` / `after`,
-  with a heartbeat every 15 seconds.
-- A long-poll variant (`?after=<seq>&wait=<seconds>`, at most 50) for callers
-  that cannot hold a stream.
+The local part is built (2.1): bearer token, 127.0.0.1 only, `POST` per
+operation, server-sent events with a 15-second heartbeat, and catching up with
+`getThread(…, after)`. Still to add for remote callers:
+- **Access from outside the machine.** Reach it through a VPN or an
+  authenticating HTTPS proxy, never an open port.
+- **A long-poll variant** (`?after=<seq>&wait=<seconds>`, at most 50) for
+  callers that cannot hold a stream; the MCP adapter needs it.
 
 ### 2.3 MCP for assistants
 

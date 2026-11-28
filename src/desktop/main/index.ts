@@ -3,17 +3,15 @@ import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BrowserWindow, app, dialog, nativeTheme, session } from 'electron';
-import { ClaudeBrain } from '../../core/brain.ts';
-import type { Brain } from '../../core/brain.ts';
-import { CodeBot } from '../../core/code-bot.ts';
-import { ClaudeEngine, bundledClaudeExecutable } from '../../core/engines/claude.ts';
-import { CodexEngine } from '../../core/engines/codex.ts';
-import { MockEngine } from '../../core/engines/mock.ts';
-import type { Engine } from '../../core/engines/types.ts';
-import { ScriptedBrain } from '../../core/scripted-brain.ts';
-import { Store } from '../../core/store.ts';
+import { createCore } from '../../core/boot.ts';
+import type { CodeBot } from '../../core/code-bot.ts';
+import { bundledClaudeExecutable } from '../../core/engines/claude.ts';
+import { acquireInstance } from '../../core/instance.ts';
+import type { InstanceLock } from '../../core/instance.ts';
+import type { Store } from '../../core/store.ts';
+import { errorMessage } from '../../core/util.ts';
 import { IPC, MAIN_BOT_ID } from '../../shared/types.ts';
-import type { AppInfo, CoreEvent } from '../../shared/types.ts';
+import type { CoreEvent } from '../../shared/types.ts';
 import { resetBadge, showWaiting } from './badge.ts';
 import { registerIpc } from './ipc.ts';
 import { Updater } from './updates.ts';
@@ -43,6 +41,7 @@ if (process.env.CODE_BOT_USER_DATA) app.setPath('userData', resolve(process.env.
 let window: BrowserWindow | undefined;
 let core: CodeBot | undefined;
 let store: Store | undefined;
+let instance: InstanceLock | undefined;
 let allowClose = false;
 let shutDown = false;
 
@@ -163,29 +162,24 @@ function start(): void {
   session.defaultSession.setPermissionCheckHandler(() => false);
 
   const userData = app.getPath('userData');
-  const dataDir = join(userData, 'data');
-  store = new Store(dataDir);
-  const executable = claudeExecutable();
-  // Sub-agent engines: Claude Code (the default for new projects) and Codex. Codex is offered even when
-  // it is not installed; a project that picks it then sees why it cannot run in the banner.
-  const engines: Engine[] = fakeModels ? [new MockEngine()] : [new ClaudeEngine({ executable }), new CodexEngine()];
-  if (!fakeModels && process.env.CODE_BOT_ENABLE_MOCK_ENGINE === '1') engines.push(new MockEngine());
-  const brain: Brain = fakeModels ? new ScriptedBrain() : new ClaudeBrain({ executable });
-  core = new CodeBot({
-    store,
-    engines,
-    brain,
-    workDir: join(userData, 'main-bot'),
-    worktreeDir: join(userData, 'worktrees'),
-  });
-
-  const info: AppInfo = {
-    version: app.getVersion(),
-    dataDir,
-    platform: process.platform,
+  // One core per data folder: the headless server (code-bot serve) may hold it.
+  try {
+    instance = acquireInstance(join(userData, 'data'), 'desktop', app.getVersion());
+  } catch (error) {
+    dialog.showErrorBox('code-bot is already running', errorMessage(error));
+    app.exit(1);
+    return;
+  }
+  const started = createCore({
+    userData,
     fakeModels,
-    engines: engines.map((engine) => engine.id),
-  };
+    enableMockEngine: process.env.CODE_BOT_ENABLE_MOCK_ENGINE === '1',
+    claudeExecutable: claudeExecutable(),
+    version: app.getVersion(),
+  });
+  store = started.store;
+  core = started.core;
+  const { info } = started;
   const send = (event: CoreEvent) => {
     if (window && !window.isDestroyed()) window.webContents.send(IPC.event, event);
   };
@@ -261,6 +255,7 @@ if (!app.requestSingleInstanceLock()) {
       .catch((error) => console.error('code-bot: shutdown failed:', error))
       .finally(() => {
         store?.close();
+        instance?.release();
         shutDown = true;
         app.quit();
       });

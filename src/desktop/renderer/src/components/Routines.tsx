@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Routine, RoutineInput, RoutineProposal, RoutineProposalClosed, RoutineSchedule } from '../../../../shared/types.ts';
 import { api } from '../api.ts';
-import { ago, describeSchedule, until, when } from '../format.ts';
+import { ago, describeSchedule, until, when } from '../../../../shared/format.ts';
 import { useAppState } from '../state.ts';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];

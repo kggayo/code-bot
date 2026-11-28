@@ -12,7 +12,7 @@ import type {
   TurnEndData,
 } from '../../../../shared/types.ts';
 import { api } from '../api.ts';
-import { ROLE_LABEL, basename, describeTool } from '../format.ts';
+import { ROLE_LABEL, basename, describeTool } from '../../../../shared/format.ts';
 import { useAppState } from '../state.ts';
 import { Composer } from './Composer.tsx';
 import { ConversationMenu } from './ConversationMenu.tsx';

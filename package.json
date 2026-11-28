@@ -15,6 +15,9 @@
   },
   "type": "module",
   "main": "out/main/index.js",
+  "bin": {
+    "code-bot": "bin/code-bot.cjs"
+  },
   "engines": {
     "node": ">=24"
   },
@@ -27,6 +30,7 @@
     "test": "node --disable-warning=ExperimentalWarning --test \"test/*.test.ts\"",
     "e2e": "electron-vite build && node scripts/e2e.ts",
     "live": "electron-vite build && node scripts/live-check.ts",
+    "headless-check": "node scripts/headless-check.ts",
     "package": "electron-vite build && electron-builder --publish never",
     "package:win": "electron-vite build && electron-builder --win --publish never",
     "package:mac": "electron-vite build && electron-builder --mac --publish never",
